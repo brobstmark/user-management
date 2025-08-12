@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - User Management System</title>
+    <link rel="stylesheet" href="../../assets/css/auth.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-header">
+            <h1>🚀 Create Account</h1>
+            <p>Join our platform and get started</p>
+        </div>
+
+        <div id="message-container"></div>
+
+        <form id="registerForm">
+            <div class="form-group">
+                <label for="email">Email Address: *</label>
+                <input type="email" id="email" name="email" required autocomplete="email">
+            </div>
+
+            <div class="form-group">
+                <label for="firstName">First Name:</label>
+                <input type="text" id="firstName" name="firstName" maxlength="100" autocomplete="given-name">
+            </div>
+
+            <div class="form-group">
+                <label for="lastName">Last Name:</label>
+                <input type="text" id="lastName" name="lastName" maxlength="100" autocomplete="family-name">
+            </div>
+
+            <div class="form-group">
+                <label for="username">Username (optional):</label>
+                <input type="text" id="username" name="username" minlength="3" maxlength="50" autocomplete="username" placeholder="Letters, numbers, underscore, hyphen only">
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password: *</label>
+                <input type="password" id="password" name="password" required minlength="8" maxlength="100" autocomplete="new-password">
+
+                <div class="password-requirements">
+                    <h4>Password Requirements:</h4>
+                    <ul>
+                        <li>At least 8 characters long</li>
+                        <li>Contains uppercase and lowercase letters</li>
+                        <li>Contains at least one number</li>
+                        <li>Contains at least one special character</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="confirmPassword">Confirm Password: *</label>
+                <input type="password" id="confirmPassword" name="confirmPassword" required autocomplete="new-password">
+            </div>
+
+            <div class="checkbox-group">
+                <input type="checkbox" id="termsAgreement" name="termsAgreement" required>
+                <label for="termsAgreement">
+                    I agree to the <a href="#" target="_blank">Terms of Service</a> and <a href="#" target="_blank">Privacy Policy</a>
+                </label>
+            </div>
+
+            <button type="submit" class="auth-btn" id="registerBtn">
+                Create Account
+            </button>
+        </form>
+
+        <div class="verification-notice">
+            <strong>📧 Email Verification Required</strong><br>
+            After registration, please check your email for a verification link to activate your account.
+        </div>
+
+        <div class="divider">
+            <span>Already have an account?</span>
+        </div>
+
+        <div class="auth-links">
+            <a href="login.html">Sign In →</a>
+        </div>
+
+        <p style="margin-top: 30px;">
+            <a href="../../index.html" class="back-link">← Back to Home</a>
+        </p>
+    </div>
+
+    <script src="../../assets/js/config.js"></script>
+    <script src="../../assets/js/main.js"></script>
+
+    <script src="../../assets/js/auth.js"></script>
+</body>
+</html>

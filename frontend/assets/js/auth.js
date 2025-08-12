@@ -145,11 +145,11 @@ const Auth = {
             const response = await window.AppConfig.apiRequest('/auth/register', {
                 method: 'POST',
                 body: JSON.stringify({
-                    email: data.email,
-                    password: data.password,
-                    full_name: data.fullName || null,
-                    phone_number: data.phone || null
-                })
+                email: data.email,
+                password: data.password,
+                first_name: data.firstName || null,
+                last_name: data.lastName || null
+            })
             });
 
             const result = await response.json();

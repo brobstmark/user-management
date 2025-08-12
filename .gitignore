@@ -1,0 +1,128 @@
+# User Management System - .gitignore
+
+# ===== CRITICAL: ENVIRONMENT & SECRETS =====
+.env
+.env.local
+.env.production
+.env.staging
+*.key
+*.pem
+secrets/
+config/local_settings.py
+
+# ===== PYTHON =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ===== VIRTUAL ENVIRONMENTS =====
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+pyvenv.cfg
+
+# ===== DATABASE =====
+*.db
+*.sqlite
+*.sqlite3
+db_data/
+postgres_data/
+mysql_data/
+
+# ===== DEVELOPMENT EMAILS (fallback files) =====
+dev_emails/
+email_logs/
+*.eml
+
+# ===== LOGS =====
+*.log
+logs/
+log_files/
+
+# ===== TESTING =====
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# ===== IDE & EDITORS =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ===== DOCKER =====
+docker-compose.override.yml
+.dockerignore
+
+# ===== TEMPORARY FILES =====
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+# ===== FRONTEND BUILD FILES =====
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.eslintcache
+
+# ===== STATIC FILES (if using collected static) =====
+staticfiles/
+static_collected/
+
+# ===== MEDIA UPLOADS =====
+media/
+uploads/
+user_uploads/
+
+# ===== BACKUP FILES =====
+*.bak
+*.backup
+backups/
+
+# ===== ALEMBIC =====
+# Keep alembic files but ignore any local configs
+alembic/versions/*.pyc
+
+# ===== JUPYTER NOTEBOOKS =====
+.ipynb_checkpoints
+
+# ===== PROFILING =====
+.prof
+
+# ===== MYPY =====
+.mypy_cache/
+.dmypy.json
+dmypy.json

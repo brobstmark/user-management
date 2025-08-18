@@ -1,6 +1,6 @@
 /**
- * Frontend Configuration System
- * Dynamically loads configuration from backend or detects environment
+ * Secure Frontend Configuration System
+ * Dynamically loads configuration from backend with security protections
  */
 
 class AppConfig {
@@ -8,6 +8,8 @@ class AppConfig {
         this.config = null;
         this.loaded = false;
         this.loadPromise = null;
+        this.maxRetries = 3;
+        this.retryDelay = 1000;
     }
 
     /**
@@ -23,57 +25,184 @@ class AppConfig {
     }
 
     /**
-     * Load configuration from backend or use fallback
+     * 🔒 Secure configuration loading with validation
      */
     async _loadConfig() {
-        try {
-            // Try to load config from backend
-            const response = await fetch('/api/config', {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
+        let attempt = 0;
+        let lastError = null;
 
-            if (response.ok) {
-                this.config = await response.json();
-                console.log('✅ Configuration loaded from backend:', this.config.app.environment);
-            } else {
-                throw new Error(`Config endpoint returned ${response.status}`);
+        while (attempt < this.maxRetries) {
+            try {
+                // 🔒 Secure fetch with timeout
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+                const response = await fetch('/api/config', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Cache-Control': 'no-cache'
+                    },
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (response.ok) {
+                    const rawConfig = await response.json();
+
+                    // 🔒 Validate configuration before use
+                    if (this._validateConfig(rawConfig)) {
+                        this.config = this._sanitizeConfig(rawConfig);
+
+                        // 🔒 Log success without exposing sensitive data
+                        if (window.logInfo) {
+                            window.logInfo('Configuration loaded successfully', {
+                                source: 'backend',
+                                environment: this.config.app?.environment || 'unknown'
+                            });
+                        }
+
+                        break;
+                    } else {
+                        throw new Error('Invalid configuration format received');
+                    }
+                } else {
+                    throw new Error(`Config endpoint returned ${response.status}`);
+                }
+            } catch (error) {
+                lastError = error;
+                attempt++;
+
+                // 🔒 Log attempt without exposing sensitive details
+                if (window.logWarn) {
+                    window.logWarn('Configuration load attempt failed', {
+                        attempt: attempt,
+                        max_attempts: this.maxRetries,
+                        error_type: error.name
+                    });
+                }
+
+                if (attempt < this.maxRetries) {
+                    await this._sleep(this.retryDelay * attempt);
+                }
             }
-        } catch (error) {
-            console.warn('⚠️ Failed to load config from backend, using fallback:', error.message);
+        }
+
+        // If all attempts failed, use fallback
+        if (!this.config) {
+            if (window.logWarn) {
+                window.logWarn('Using fallback configuration', {
+                    reason: 'backend_unavailable',
+                    last_error: lastError?.name
+                });
+            }
+
             this.config = this._getFallbackConfig();
         }
 
         this.loaded = true;
-
-        // Set global CSS variables based on config
         this._setGlobalStyles();
-
         return this.config;
     }
 
     /**
-     * Get fallback configuration (environment detection)
+     * 🔒 Validate configuration structure
+     */
+    _validateConfig(config) {
+        try {
+            // Check required top-level properties
+            const requiredProperties = ['api', 'app', 'features', 'security', 'ui'];
+            for (const prop of requiredProperties) {
+                if (!config[prop] || typeof config[prop] !== 'object') {
+                    return false;
+                }
+            }
+
+            // Validate API configuration
+            if (!config.api.baseUrl || typeof config.api.baseUrl !== 'string') {
+                return false;
+            }
+
+            // Validate app configuration
+            if (!config.app.environment || !config.app.name) {
+                return false;
+            }
+
+            // Validate environment value
+            const validEnvironments = ['development', 'staging', 'production'];
+            if (!validEnvironments.includes(config.app.environment)) {
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    /**
+     * 🔒 Sanitize configuration data
+     */
+    _sanitizeConfig(config) {
+        return {
+            api: {
+                baseUrl: String(config.api.baseUrl).replace(/[<>"']/g, ''), // Remove dangerous chars
+                timeout: Math.min(Math.max(parseInt(config.api.timeout) || 30000, 5000), 60000), // 5-60 seconds
+                retries: Math.min(Math.max(parseInt(config.api.retries) || 3, 1), 5) // 1-5 retries
+            },
+            app: {
+                name: String(config.app.name).substring(0, 100), // Limit length
+                version: String(config.app.version || '1.0.0').substring(0, 20),
+                environment: ['development', 'staging', 'production'].includes(config.app.environment)
+                    ? config.app.environment : 'production',
+                debug: config.app.environment !== 'production' && Boolean(config.app.debug)
+            },
+            features: {
+                emailVerification: Boolean(config.features.emailVerification),
+                passwordReset: Boolean(config.features.passwordReset),
+                usernameRecovery: Boolean(config.features.usernameRecovery),
+                twoFactorAuth: Boolean(config.features.twoFactorAuth),
+                socialAuth: Boolean(config.features.socialAuth)
+            },
+            security: {
+                tokenExpiry: Math.min(Math.max(parseInt(config.security.tokenExpiry) || 1800, 300), 7200), // 5min-2hrs
+                maxLoginAttempts: Math.min(Math.max(parseInt(config.security.maxLoginAttempts) || 5, 3), 10), // 3-10
+                passwordMinLength: Math.min(Math.max(parseInt(config.security.passwordMinLength) || 8, 8), 20) // 8-20
+            },
+            ui: {
+                theme: ['light', 'dark'].includes(config.ui.theme) ? config.ui.theme : 'light',
+                showDebugInfo: config.app.environment !== 'production' && Boolean(config.ui.showDebugInfo),
+                enableAnalytics: config.app.environment === 'production' && Boolean(config.ui.enableAnalytics)
+            }
+        };
+    }
+
+    /**
+     * 🔒 Secure fallback configuration
      */
     _getFallbackConfig() {
         const hostname = window.location.hostname;
         const protocol = window.location.protocol;
         const port = window.location.port;
 
-        // Detect environment
+        // 🔒 Secure environment detection
         let environment = 'production';
         let debug = false;
         let apiBaseUrl = '/api/v1';
 
+        // Only allow localhost/127.0.0.1 for development
         if (hostname === 'localhost' || hostname === '127.0.0.1') {
             environment = 'development';
             debug = true;
-            apiBaseUrl = `${protocol}//${hostname}:${port || '8000'}/api/v1`;
+            // 🔒 Validate protocol and port for security
+            if (protocol === 'http:' || protocol === 'https:') {
+                const safePort = port && /^\d{1,5}$/.test(port) ? port : '8000';
+                apiBaseUrl = `${protocol}//${hostname}:${safePort}/api/v1`;
+            }
         } else if (hostname.includes('staging') || hostname.includes('dev')) {
             environment = 'staging';
-            debug = true;
+            debug = false; // Don't enable debug in staging by default
         }
 
         return {
@@ -109,37 +238,71 @@ class AppConfig {
     }
 
     /**
-     * Set global CSS variables based on configuration
+     * 🔒 Secure CSS styling with validation
      */
     _setGlobalStyles() {
-        const root = document.documentElement;
+        try {
+            const root = document.documentElement;
 
-        // Set CSS variables for theming
-        if (this.config.ui.theme === 'dark') {
-            root.style.setProperty('--primary-color', '#667eea');
-            root.style.setProperty('--background-color', '#1a1a1a');
-            root.style.setProperty('--text-color', '#ffffff');
-        } else {
-            root.style.setProperty('--primary-color', '#667eea');
-            root.style.setProperty('--background-color', '#ffffff');
-            root.style.setProperty('--text-color', '#333333');
-        }
+            // 🔒 Validate theme value before applying
+            const theme = this.config.ui.theme;
+            if (!['light', 'dark'].includes(theme)) {
+                if (window.logWarn) {
+                    window.logWarn('Invalid theme value, using default', { theme });
+                }
+                return;
+            }
 
-        // Add debug styles if enabled
-        if (this.config.ui.showDebugInfo) {
-            document.body.classList.add('debug-mode');
+            // 🔒 Secure CSS property setting
+            const cssProperties = theme === 'dark' ? {
+                '--primary-color': '#667eea',
+                '--background-color': '#1a1a1a',
+                '--text-color': '#ffffff'
+            } : {
+                '--primary-color': '#667eea',
+                '--background-color': '#ffffff',
+                '--text-color': '#333333'
+            };
+
+            // Apply CSS properties safely
+            for (const [property, value] of Object.entries(cssProperties)) {
+                // 🔒 Validate CSS property name and value
+                if (/^--[a-z-]+$/.test(property) && /^[#a-zA-Z0-9\s]+$/.test(value)) {
+                    root.style.setProperty(property, value);
+                }
+            }
+
+            // 🔒 Safe debug mode indication
+            if (this.config.ui.showDebugInfo) {
+                document.body.classList.add('debug-mode');
+            }
+        } catch (error) {
+            if (window.logError) {
+                window.logError('Failed to set global styles', {
+                    error_type: error.name
+                });
+            }
         }
     }
 
     /**
-     * Get API base URL
+     * 🔒 Secure API URL generation
      */
     getApiUrl(endpoint = '') {
         if (!this.loaded) {
-            console.warn('Config not loaded yet, using fallback API URL');
+            // Use safe fallback
             return `/api/v1${endpoint}`;
         }
-        return `${this.config.api.baseUrl}${endpoint}`;
+
+        // 🔒 Validate endpoint parameter
+        if (typeof endpoint !== 'string') {
+            endpoint = '';
+        }
+
+        // 🔒 Sanitize endpoint to prevent injection
+        const sanitizedEndpoint = endpoint.replace(/[<>"']/g, '');
+
+        return `${this.config.api.baseUrl}${sanitizedEndpoint}`;
     }
 
     /**
@@ -157,10 +320,16 @@ class AppConfig {
     }
 
     /**
-     * Get app information
+     * Get app information (safe subset)
      */
     getAppInfo() {
-        return this.config?.app || {};
+        const appInfo = this.config?.app || {};
+        // 🔒 Return only safe properties
+        return {
+            name: appInfo.name,
+            version: appInfo.version,
+            environment: appInfo.environment
+        };
     }
 
     /**
@@ -178,24 +347,82 @@ class AppConfig {
     }
 
     /**
-     * Log debug information if debug mode is enabled
+     * 🔒 Secure debug logging
      */
     debug(...args) {
-        if (this.isDebug()) {
-            console.log(`[${this.getEnvironment().toUpperCase()}]`, ...args);
+        if (this.isDebug() && window.logDebug) {
+            // 🔒 Use secure logger instead of console.log
+            window.logDebug('AppConfig debug', {
+                environment: this.getEnvironment(),
+                data: args
+            });
         }
     }
 
     /**
-     * Make authenticated API request with automatic token handling
+     * 🔒 Secure token retrieval (consistent with auth.js)
+     */
+    _getToken() {
+        try {
+            // 🔒 Use sessionStorage for consistency with auth.js
+            return sessionStorage.getItem('access_token');
+        } catch (error) {
+            if (window.logError) {
+                window.logError('Failed to retrieve token', {
+                    error_type: error.name
+                });
+            }
+            return null;
+        }
+    }
+
+    /**
+     * 🔒 Secure redirect function
+     */
+    _secureRedirect(path) {
+        // 🔒 Validate redirect path
+        if (typeof path !== 'string' ||
+            path.startsWith('http://') ||
+            path.startsWith('https://') ||
+            path.startsWith('//') ||
+            path.includes('javascript:') ||
+            path.includes('data:')) {
+
+            if (window.logSecurityEvent) {
+                window.logSecurityEvent('blocked_dangerous_redirect', {
+                    attempted_path: path,
+                    reason: 'potential_open_redirect'
+                });
+            }
+            return;
+        }
+
+        window.location.href = path;
+    }
+
+    /**
+     * 🔒 Secure API request with enhanced security
      */
     async apiRequest(endpoint, options = {}) {
         if (!this.loaded) {
             await this.init();
         }
 
-        const token = localStorage.getItem('access_token');
+        const token = this._getToken();
         const url = this.getApiUrl(endpoint);
+
+        // 🔒 Validate URL before making request
+        try {
+            new URL(url, window.location.origin);
+        } catch (error) {
+            if (window.logSecurityEvent) {
+                window.logSecurityEvent('invalid_api_url', {
+                    endpoint,
+                    error_type: error.name
+                });
+            }
+            throw new Error('Invalid API URL');
+        }
 
         const config = {
             headers: {
@@ -209,75 +436,102 @@ class AppConfig {
         try {
             const response = await fetch(url, config);
 
-            // Handle authentication errors
+            // 🔒 Handle authentication errors securely
             if (response.status === 401) {
-                localStorage.removeItem('access_token');
-                localStorage.removeItem('user_email');
-                if (window.location.pathname !== '/frontend/pages/auth/login.html') {
-                    window.location.href = '/frontend/pages/auth/login.html';
+                // 🔒 Clear tokens securely
+                try {
+                    sessionStorage.removeItem('access_token');
+                    sessionStorage.removeItem('user_email');
+                } catch (error) {
+                    // Handle storage errors gracefully
+                }
+
+                // 🔒 Log security event
+                if (window.logSecurityEvent) {
+                    window.logSecurityEvent('authentication_expired', {
+                        action: 'token_invalid',
+                        endpoint: endpoint
+                    });
+                }
+
+                // 🔒 Secure redirect to login
+                if (!window.location.pathname.includes('login.html')) {
+                    this._secureRedirect('/frontend/pages/auth/login.html');
                 }
                 return null;
             }
 
             return response;
         } catch (error) {
-            this.debug('API request failed:', error);
+            // 🔒 Secure error logging
+            if (window.logError) {
+                window.logError('API request failed', {
+                    endpoint: endpoint,
+                    error_type: error.name,
+                    status: error.status || 'network_error'
+                });
+            }
             throw error;
         }
     }
 
     /**
-     * Show notification based on environment
+     * 🔒 Secure notification system
      */
     showNotification(message, type = 'info') {
-        if (this.isDebug()) {
-            console.log(`[${type.toUpperCase()}]`, message);
+        // 🔒 Sanitize message
+        const sanitizedMessage = String(message).substring(0, 200);
+        const sanitizedType = ['info', 'success', 'warning', 'error'].includes(type) ? type : 'info';
+
+        if (window.logInfo) {
+            window.logInfo('Notification displayed', {
+                type: sanitizedType,
+                message: sanitizedMessage
+            });
         }
 
-        // You can implement a toast notification system here
-        // For now, just alert in development
-        if (this.getEnvironment() === 'development') {
-            alert(`${type.toUpperCase()}: ${message}`);
+        // Use global message display if available
+        if (window.displayMessage) {
+            window.displayMessage(sanitizedMessage, sanitizedType);
         }
+    }
+
+    /**
+     * 🔒 Sleep utility for retry logic
+     */
+    _sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, Math.min(ms, 5000))); // Max 5 second delay
     }
 }
 
-// Create global instance (debug version)
-console.log("=== STARTING INSTANCE CREATION ===");
-console.log("1. AppConfig before instance creation:", typeof AppConfig);
-console.log("2. AppConfig is:", AppConfig);
+// 🔒 Secure global instance creation
+(function() {
+    'use strict';
 
-try {
-    // Store the class first
-    console.log("3. Storing class reference...");
-    const AppConfigClass = AppConfig;
-    console.log("4. AppConfigClass:", typeof AppConfigClass);
+    try {
+        const appConfigInstance = new AppConfig();
 
-    // Create instance from the stored class
-    console.log("5. Creating new instance...");
-    const newInstance = new AppConfigClass();
-    console.log("6. New instance created:", typeof newInstance);
-    console.log("7. New instance.init exists:", typeof newInstance.init);
-    console.log("8. New instance methods:", Object.getOwnPropertyNames(newInstance));
+        // 🔒 Secure global exposure with protection
+        Object.defineProperty(window, 'AppConfig', {
+            value: appConfigInstance,
+            writable: false,
+            configurable: false
+        });
 
-    // Assign to window
-    console.log("9. Assigning to window.AppConfig...");
-    window.AppConfig = newInstance;
-    console.log("10. window.AppConfig after assignment:", typeof window.AppConfig);
-    console.log("11. window.AppConfig.init:", typeof window.AppConfig.init);
+        // 🔒 Log initialization securely
+        if (window.logInfo) {
+            window.logInfo('AppConfig initialized', {
+                module: 'config'
+            });
+        }
+    } catch (error) {
+        // 🔒 Fallback if defineProperty fails
+        window.AppConfig = new AppConfig();
 
-    // Verify it worked
-    if (typeof window.AppConfig.init === 'function') {
-        console.log('✅ AppConfig instance created successfully');
-    } else {
-        console.log('❌ Instance creation failed - init method missing');
-        console.log('window.AppConfig is:', window.AppConfig);
+        if (window.logError) {
+            window.logError('AppConfig initialization fallback used', {
+                error_type: error.name
+            });
+        }
     }
-} catch (error) {
-    console.error('❌ Exception during instance creation:', error);
-}
-
-console.log("=== FINAL STATE ===");
-console.log("Final AppConfig:", typeof AppConfig);
-console.log("Final window.AppConfig:", typeof window.AppConfig);
-console.log("=== END DEBUG ===");
+})();

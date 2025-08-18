@@ -27,6 +27,8 @@ class PIIFilter(logging.Filter):
             re.compile(r'\b[A-Fa-f0-9]{32,}\b'),  # Hex tokens (32+ chars)
             re.compile(r'\bBearereyJ[A-Za-z0-9+/=]+\b'),  # JWT tokens
             re.compile(r'\btoken[=:]\s*[A-Za-z0-9+/=]+', re.IGNORECASE),  # token=value
+            re.compile(r'\bsk_[a-z]+_[A-Za-z0-9]+', re.IGNORECASE),  # Stripe-style API keys
+
         ]
 
         # Password patterns
@@ -34,6 +36,8 @@ class PIIFilter(logging.Filter):
             re.compile(r'\bpassword[=:]\s*\S+', re.IGNORECASE),
             re.compile(r'\bpwd[=:]\s*\S+', re.IGNORECASE),
             re.compile(r'\bpass[=:]\s*\S+', re.IGNORECASE),
+            re.compile(r'://[^:]+:([^@]+)@', re.IGNORECASE),  # Database URL passwords
+
         ]
 
         # Credit card pattern (basic)

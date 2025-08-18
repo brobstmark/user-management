@@ -4,198 +4,87 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - User Management System</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
 
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
+    <!-- 🛡️ UPDATED SECURITY HEADERS - 2025 STANDARDS -->
 
-        .auth-container {
-            background: white;
-            padding: 40px;
-            border-radius: 15px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
-            width: 100%;
-            max-width: 450px;
-            text-align: center;
-        }
+    <!-- ✅ ENHANCED CSP: Includes frame-ancestors to replace X-Frame-Options -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self';">
 
-        .auth-header {
-            margin-bottom: 30px;
-        }
+    <!-- ✅ KEEP: Prevents MIME-sniffing attacks -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
 
-        .auth-header h1 {
-            color: #333;
-            margin-bottom: 10px;
-            font-size: 28px;
-        }
 
-        .auth-header p {
-            color: #666;
-            font-size: 16px;
-        }
+    <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
 
-        .form-group {
-            margin-bottom: 20px;
-            text-align: left;
-        }
+    <!-- 🆕 ADDED: Prevents DNS prefetching for privacy -->
+    <meta http-equiv="x-dns-prefetch-control" content="off">
 
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: #555;
-            font-weight: 500;
-        }
+    <!-- 🆕 ADDED: Additional security for older browsers -->
+    <meta http-equiv="Permissions-Policy" content="geolocation=(), microphone=(), camera=()">
 
-        .form-group input {
-            width: 100%;
-            padding: 12px 15px;
-            border: 2px solid #e1e1e1;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.3s ease;
-        }
-
-        .form-group input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        .auth-btn {
-            width: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 12px 20px;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s ease;
-            margin-bottom: 20px;
-        }
-
-        .auth-btn:hover {
-            transform: translateY(-2px);
-        }
-
-        .auth-btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .message {
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            font-weight: 500;
-        }
-
-        .message.success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-
-        .message.error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-
-        .auth-links {
-            text-align: center;
-            margin-top: 20px;
-        }
-
-        .auth-links a {
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 500;
-            margin: 0 10px;
-            display: inline-block;
-            margin-bottom: 10px;
-        }
-
-        .auth-links a:hover {
-            text-decoration: underline;
-        }
-
-        .divider {
-            margin: 20px 0;
-            text-align: center;
-            position: relative;
-        }
-
-        .divider::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 0;
-            right: 0;
-            height: 1px;
-            background: #e1e1e1;
-        }
-
-        .divider span {
-            background: white;
-            padding: 0 15px;
-            color: #666;
-            font-size: 14px;
-        }
-
-        .back-link {
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 500;
-            font-size: 14px;
-        }
-
-        .back-link:hover {
-            text-decoration: underline;
-        }
-
-        @media (max-width: 480px) {
-            .auth-container {
-                padding: 30px 20px;
-            }
-        }
-    </style>
+    <!-- 🔗 EXTERNAL STYLES -->
+    <link rel="stylesheet" href="../../assets/css/auth.css">
+    <link rel="stylesheet" href="../../assets/css/main.css">
+    <link rel="stylesheet" href="../../assets/css/login.css">
 </head>
 <body>
+    <!-- Rest of HTML content unchanged -->
     <div class="auth-container">
         <div class="auth-header">
             <h1>🔐 Welcome Back</h1>
             <p>Sign in to your account</p>
         </div>
 
-        <div id="message-container"></div>
+        <!-- Security notices and form content... -->
+        <div class="security-notice" id="securityNotice" style="display: none;">
+            <strong>Security Notice:</strong> <span id="securityMessage"></span>
+        </div>
 
-        <form id="loginForm">
+        <div class="rate-limit-warning" id="rateLimitWarning">
+            <strong>⚠️ Too many attempts:</strong> Please wait <span id="rateLimitCountdown">60</span> seconds before trying again.
+        </div>
+
+        <div id="messageContainer"></div>
+
+        <form id="loginForm" novalidate>
             <div class="form-group">
                 <label for="email">Email Address:</label>
-                <input type="email" id="email" name="email" required autocomplete="email">
+                <input
+                    type="email"
+                    id="email"
+                    name="email"
+                    required
+                    autocomplete="email"
+                    maxlength="254"
+                    pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                    title="Please enter a valid email address"
+                    data-validate="email"
+                >
+                <div class="validation-message" id="emailValidation"></div>
             </div>
 
             <div class="form-group">
                 <label for="password">Password:</label>
-                <input type="password" id="password" name="password" required autocomplete="current-password">
+                <input
+                    type="password"
+                    id="password"
+                    name="password"
+                    required
+                    autocomplete="current-password"
+                    minlength="8"
+                    maxlength="128"
+                    title="Password must be at least 8 characters"
+                    data-validate="password"
+                >
+                <button type="button" class="password-toggle" id="passwordToggle" tabindex="-1">
+                    👁️
+                </button>
+                <div class="validation-message" id="passwordValidation"></div>
             </div>
 
             <button type="submit" class="auth-btn" id="loginBtn">
-                Sign In
+                <span class="loading-spinner" id="loadingSpinner"></span>
+                <span id="buttonText">Sign In</span>
             </button>
         </form>
 
@@ -217,8 +106,11 @@
         </p>
     </div>
 
+    <!-- 🔒 SECURE EXTERNAL SCRIPTS -->
     <script src="../../assets/js/config.js"></script>
+    <script src="../../assets/js/logger.js"></script>
     <script src="../../assets/js/main.js"></script>
     <script src="../../assets/js/auth.js"></script>
+    <script src="../../assets/js/login.js"></script>
 </body>
 </html>

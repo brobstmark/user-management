@@ -67,7 +67,7 @@ class DevelopmentFormatter(logging.Formatter):
 
     def _get_extra_info(self, record: logging.LogRecord) -> str:
         """
-        Extract extra information from log record
+        Extract extra information from log record and sanitize it
         """
         # Standard logging attributes to exclude
         standard_attrs = {
@@ -82,7 +82,18 @@ class DevelopmentFormatter(logging.Formatter):
             if key not in standard_attrs and not key.startswith('_'):
                 extra[key] = value
 
-        return self._safe_json_dumps(extra) if extra else ""
+        if not extra:
+            return ""
+
+        # ✅ NEW: Sanitize the extra data before displaying
+        try:
+            from backend.utils.log_filters import PIIFilter
+            pii_filter = PIIFilter()
+            sanitized_extra = pii_filter._sanitize_dict(extra)
+            return self._safe_json_dumps(sanitized_extra)
+        except Exception:
+            # Fallback to original behavior if sanitization fails
+            return self._safe_json_dumps(extra)
 
     def _safe_json_dumps(self, data: Dict[str, Any]) -> str:
         """

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forgot Username - User Management System</title>
+    <link rel="stylesheet" href="../../assets/css/main.css">
+    <link rel="stylesheet" href="../../assets/css/auth.css">
+    <style>
+        /* Additional styles specific to forgot username page */
+        .forgot-info {
+            background-color: #e8f4f8;
+            border: 1px solid #b8e6f0;
+            color: #0c5460;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 25px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .forgot-info h4 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            color: #0a4a54;
+        }
+
+        .forgot-info ul {
+            margin: 10px 0 0 0;
+            padding-left: 20px;
+        }
+
+        .forgot-info li {
+            margin-bottom: 5px;
+        }
+
+        .auth-links {
+            text-align: center;
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 1px solid #e1e1e1;
+        }
+
+        .auth-links a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+            margin: 0 15px;
+        }
+
+        .auth-links a:hover {
+            text-decoration: underline;
+        }
+
+        .security-note {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 20px;
+            font-size: 13px;
+            text-align: left;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .field-error {
+            color: #dc3545;
+            font-size: 14px;
+            margin-top: 5px;
+            display: block;
+        }
+
+        .form-group input.error {
+            border-color: #dc3545;
+            background-color: #fff5f5;
+        }
+
+        .form-group input.success {
+            border-color: #28a745;
+            background-color: #f8fff8;
+        }
+
+        .help-text {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #495057;
+        }
+
+        .help-text h4 {
+            margin: 0 0 10px 0;
+            color: #343a40;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <h1>👤 Forgot Username</h1>
+                <p>Enter your email and we'll send you your username.</p>
+            </div>
+
+            <div class="help-text">
+                <h4>📧 Can't remember your username?</h4>
+                <p>No problem! Enter the email address you used to register, and we'll send your username to your inbox. If you used your email address to log in, that's your username!</p>
+            </div>
+
+            <div class="forgot-info">
+                <h4>💡 How Username Recovery Works:</h4>
+                <ul>
+                    <li>Enter your email address below</li>
+                    <li>Check your inbox for your username reminder</li>
+                    <li>Use your username to log in</li>
+                    <li>If you forgot your password too, use the password reset option</li>
+                </ul>
+            </div>
+
+            <div id="message-container"></div>
+
+            <form id="forgotUsernameForm" class="auth-form">
+                <div class="form-group">
+                    <label for="email">Email Address:</label>
+                    <input
+                        type="email"
+                        id="email"
+                        name="email"
+                        required
+                        placeholder="Enter your email address"
+                        autocomplete="email"
+                    >
+                </div>
+
+                <button type="submit" class="auth-btn" id="forgotBtn">
+                    Send Username
+                </button>
+            </form>
+
+            <div class="security-note">
+                <strong>🛡️ Privacy Notice:</strong> We'll only send username information if the email address is associated with an account. Your account security is protected at all times.
+            </div>
+
+            <div class="auth-links">
+                <a href="login.html">← Back to Login</a>
+                <a href="register.html">Create Account</a>
+                <a href="forgot-password.html">Forgot Password?</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load configuration first -->
+    <script src="../../assets/js/config.js"></script>
+
+    <!-- Initialize app configuration -->
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // Initialize configuration
+                await window.AppConfig.init();
+                console.log('✅ Configuration loaded for forgot username page');
+
+                // Update form action based on environment
+                const environment = window.AppConfig.getEnvironment();
+                if (environment === 'development') {
+                    console.log('🔧 Development mode: Enhanced debugging enabled');
+                }
+
+                // Show environment indicator if debug mode
+                if (window.AppConfig.isDebug()) {
+                    document.body.insertAdjacentHTML('afterbegin',
+                        `<div style="background: #17a2b8; color: white; padding: 5px 10px; text-align: center; font-size: 12px;">
+                            DEVELOPMENT MODE - ${environment.toUpperCase()}
+                        </div>`
+                    );
+                }
+
+            } catch (error) {
+                console.warn('⚠️ Config initialization failed:', error);
+            }
+        });
+    </script>
+
+    <!-- Load authentication functionality -->
+    <script src="../../assets/js/auth.js"></script>
+</body>
+</html>

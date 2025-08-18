@@ -5,7 +5,7 @@
 
 set -e  # Exit on any error
 
-PROJECT_NAME="user-management-system"
+PROJECT_NAME="user-management"
 
 # Colors for output
 RED='\033[0;31m'

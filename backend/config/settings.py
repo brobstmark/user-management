@@ -1,5 +1,6 @@
 """
 Application Settings and Configuration
+Updated with Secure Logging Configuration
 """
 from typing import List
 from pydantic_settings import BaseSettings
@@ -40,9 +41,26 @@ class Settings(BaseSettings):
     EMAIL_FROM_NAME: str = config("EMAIL_FROM_NAME", default="User Management System")
     EMAIL_FALLBACK_TO_FILE: bool = config("EMAIL_FALLBACK_TO_FILE", default=False, cast=bool)
 
+    # ✅ NEW: Logging Configuration
+    LOG_LEVEL: str = config("LOG_LEVEL", default="INFO")
+    LOG_TO_FILE: bool = config("LOG_TO_FILE", default=True, cast=bool)
+    LOG_FILE_MAX_SIZE: int = config("LOG_FILE_MAX_SIZE", default=10 * 1024 * 1024, cast=int)  # 10MB
+    LOG_FILE_BACKUP_COUNT: int = config("LOG_FILE_BACKUP_COUNT", default=5, cast=int)
+    LOG_DIRECTORY: str = config("LOG_DIRECTORY", default="logs")
+
+    # Security logging settings
+    LOG_PII_REDACTION: bool = config("LOG_PII_REDACTION", default=True, cast=bool)
+    LOG_RATE_LIMIT_PER_MINUTE: int = config("LOG_RATE_LIMIT_PER_MINUTE", default=200, cast=int)
+
+    # Audit logging
+    AUDIT_LOG_ENABLED: bool = config("AUDIT_LOG_ENABLED", default=True, cast=bool)
+    AUDIT_LOG_RETENTION_DAYS: int = config("AUDIT_LOG_RETENTION_DAYS", default=90, cast=int)
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._setup_environment_config()
+        # ✅ Initialize logging after environment setup
+        self._initialize_logging()
 
     def _setup_environment_config(self):
         """Setup environment-specific configuration"""
@@ -78,6 +96,19 @@ class Settings(BaseSettings):
         else:
             # Custom environment - use provided URLs
             self.ALLOWED_ORIGINS = [self.FRONTEND_URL, self.API_URL]
+
+    def _initialize_logging(self):
+        """Initialize the secure logging system"""
+        try:
+            from backend.utils.logging import initialize_logging
+            initialize_logging(
+                environment=self.ENVIRONMENT,
+                debug=self.DEBUG
+            )
+            print(f"✅ Secure logging initialized for {self.ENVIRONMENT} environment")
+        except ImportError as e:
+            print(f"⚠️ Could not initialize secure logging: {e}")
+            print("   Using basic print statements until logging system is set up")
 
     def get_frontend_config(self) -> dict:
         """Get configuration for frontend consumption"""

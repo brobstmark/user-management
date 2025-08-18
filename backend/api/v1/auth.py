@@ -1,8 +1,9 @@
 """
 Authentication Endpoints with Email Verification
+Enhanced with Secure Logging and Audit Trail
 """
 from datetime import timedelta, datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
 from backend.config.database import get_db
@@ -26,13 +27,27 @@ from backend.models.user import User
 from backend.schemas.user import PasswordReset, PasswordResetConfirm, ForgotUsername, PasswordChange
 from backend.crud.user import set_password_reset_token, reset_password_with_token, change_password
 from backend.core.security import create_password_reset_token, verify_password_reset_token
-from backend.services.email_service import send_password_reset_email, send_username_recovery_email, send_password_changed_notification
+from backend.services.email_service import send_password_reset_email, send_username_recovery_email, \
+    send_password_changed_notification
+
+# 🔥 Import secure logging system
+from backend.utils.logging import (
+    get_auth_logger,
+    get_security_logger,
+    log_security_event,
+    log_audit_event
+)
+
 router = APIRouter()
+
+# Initialize auth logger
+logger = get_auth_logger()
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(
         user_data: UserRegister,
+        request: Request,
         db: Session = Depends(get_db)
 ):
     """
@@ -46,10 +61,35 @@ async def register_user(
 
     Returns the created user data and sends verification email
     """
+    # Get client IP for security logging
+    client_ip = request.client.host if request.client else "unknown"
+
+    logger.info("User registration attempt", extra={
+        'action': 'register',
+        'email': user_data.email,  # Will be redacted
+        'ip_address': client_ip,
+        'username': user_data.username
+    })
+
     # Create the user
     result = create_user(db, user_data)
 
     if not result["success"]:
+        logger.warning("User registration failed - validation errors", extra={
+            'action': 'register',
+            'email': user_data.email,  # Will be redacted
+            'errors': result["errors"],
+            'ip_address': client_ip
+        })
+
+        log_security_event(
+            event_type="registration",
+            action="register_user",
+            result="validation_failure",
+            ip_address=client_ip,
+            email=user_data.email  # Will be redacted
+        )
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -66,20 +106,69 @@ async def register_user(
     user.email_verification_sent_at = datetime.now(timezone.utc)
     db.commit()
 
+    logger.debug("Generated verification token for new user", extra={
+        'action': 'generate_verification_token',
+        'user_id': user.id,
+        'email': user.email  # Will be redacted
+    })
+
     # Send verification email
     from backend.services.email_service import send_verification_email
     user_name = user.first_name or user.email.split('@')[0]
 
     try:
-        await send_verification_email(
+        email_sent = await send_verification_email(
             user_email=user.email,
             user_name=user_name,
             verification_token=verification_token
         )
-        print(f"✅ Verification email sent to {user.email}")
+
+        if email_sent:
+            logger.info("Verification email sent successfully", extra={
+                'action': 'send_verification_email',
+                'user_id': user.id,
+                'email': user.email  # Will be redacted
+            })
+        else:
+            logger.warning("Verification email sending failed", extra={
+                'action': 'send_verification_email',
+                'user_id': user.id,
+                'email': user.email  # Will be redacted
+            })
+
     except Exception as e:
-        print(f"⚠️ Failed to send verification email: {e}")
-        # Don't fail registration if email sending fails
+        logger.error("Exception occurred while sending verification email", extra={
+            'action': 'send_verification_email',
+            'user_id': user.id,
+            'email': user.email,  # Will be redacted
+            'error_type': type(e).__name__,
+            'error_message': str(e)
+        })
+
+    # Log successful registration
+    log_security_event(
+        event_type="registration",
+        action="register_user",
+        result="success",
+        user_id=user.id,
+        ip_address=client_ip,
+        email=user.email  # Will be redacted
+    )
+
+    log_audit_event(
+        action="create_user_account",
+        resource="user_account",
+        result="success",
+        user_id=user.id,
+        ip_address=client_ip
+    )
+
+    logger.info("User registration completed successfully", extra={
+        'action': 'register',
+        'user_id': user.id,
+        'email': user.email,  # Will be redacted
+        'ip_address': client_ip
+    })
 
     return user
 
@@ -87,6 +176,7 @@ async def register_user(
 @router.post("/login", response_model=TokenResponse)
 async def login_user(
         login_data: UserLogin,
+        request: Request,
         db: Session = Depends(get_db)
 ):
     """
@@ -97,10 +187,35 @@ async def login_user(
 
     Returns JWT access token for authentication
     """
+    # Get client IP for security logging
+    client_ip = request.client.host if request.client else "unknown"
+
+    logger.info("Login attempt", extra={
+        'action': 'login',
+        'email': login_data.email,  # Will be redacted
+        'ip_address': client_ip
+    })
+
     # Get user by email
     user = get_user_by_email(db, login_data.email)
 
     if not user:
+        logger.warning("Login failed - user not found", extra={
+            'action': 'login',
+            'email': login_data.email,  # Will be redacted
+            'ip_address': client_ip,
+            'failure_reason': 'user_not_found'
+        })
+
+        log_security_event(
+            event_type="authentication",
+            action="login",
+            result="failure",
+            failure_reason="invalid_credentials",
+            ip_address=client_ip,
+            email=login_data.email  # Will be redacted
+        )
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -109,6 +224,24 @@ async def login_user(
 
     # Verify password
     if not verify_password(login_data.password, user.hashed_password):
+        logger.warning("Login failed - invalid password", extra={
+            'action': 'login',
+            'user_id': user.id,
+            'email': user.email,  # Will be redacted
+            'ip_address': client_ip,
+            'failure_reason': 'invalid_password'
+        })
+
+        log_security_event(
+            event_type="authentication",
+            action="login",
+            result="failure",
+            failure_reason="invalid_credentials",
+            user_id=user.id,
+            ip_address=client_ip,
+            email=user.email  # Will be redacted
+        )
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -117,6 +250,23 @@ async def login_user(
 
     # Check if user is active
     if not user.is_active:
+        logger.warning("Login failed - account deactivated", extra={
+            'action': 'login',
+            'user_id': user.id,
+            'email': user.email,  # Will be redacted
+            'ip_address': client_ip,
+            'failure_reason': 'account_deactivated'
+        })
+
+        log_security_event(
+            event_type="authentication",
+            action="login",
+            result="failure",
+            failure_reason="account_deactivated",
+            user_id=user.id,
+            ip_address=client_ip
+        )
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Account is deactivated"
@@ -132,6 +282,32 @@ async def login_user(
         expires_delta=access_token_expires
     )
 
+    # Log successful login
+    logger.info("Login successful", extra={
+        'action': 'login',
+        'user_id': user.id,
+        'email': user.email,  # Will be redacted
+        'ip_address': client_ip,
+        'token_expires_in': settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    })
+
+    log_security_event(
+        event_type="authentication",
+        action="login",
+        result="success",
+        user_id=user.id,
+        ip_address=client_ip,
+        session_duration=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+
+    log_audit_event(
+        action="user_login",
+        resource="user_session",
+        result="success",
+        user_id=user.id,
+        ip_address=client_ip
+    )
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -140,7 +316,10 @@ async def login_user(
 
 
 @router.post("/logout", response_model=MessageResponse)
-async def logout_user():
+async def logout_user(
+        request: Request,
+        current_user: User = Depends(get_current_active_user)
+):
     """
     User logout endpoint
 
@@ -148,6 +327,23 @@ async def logout_user():
     by removing the token. This endpoint is provided for consistency
     and can be extended for token blacklisting if needed.
     """
+    client_ip = request.client.host if request.client else "unknown"
+
+    logger.info("User logout", extra={
+        'action': 'logout',
+        'user_id': current_user.id,
+        'email': current_user.email,  # Will be redacted
+        'ip_address': client_ip
+    })
+
+    log_audit_event(
+        action="user_logout",
+        resource="user_session",
+        result="success",
+        user_id=current_user.id,
+        ip_address=client_ip
+    )
+
     return {
         "message": "Successfully logged out",
         "success": True
@@ -156,6 +352,7 @@ async def logout_user():
 
 @router.post("/send-verification", response_model=MessageResponse)
 async def send_verification_email_endpoint(
+        request: Request,
         current_user: User = Depends(get_current_active_user),
         db: Session = Depends(get_db)
 ):
@@ -164,8 +361,23 @@ async def send_verification_email_endpoint(
 
     Requires: Valid JWT token
     """
+    client_ip = request.client.host if request.client else "unknown"
+
+    logger.info("Verification email resend requested", extra={
+        'action': 'resend_verification',
+        'user_id': current_user.id,
+        'email': current_user.email,  # Will be redacted
+        'ip_address': client_ip
+    })
+
     # Check if already verified
     if current_user.is_verified:
+        logger.info("Verification email requested but already verified", extra={
+            'action': 'resend_verification',
+            'user_id': current_user.id,
+            'email': current_user.email  # Will be redacted
+        })
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email is already verified"
@@ -179,6 +391,11 @@ async def send_verification_email_endpoint(
     current_user.email_verification_sent_at = datetime.now(timezone.utc)
     db.commit()
 
+    logger.debug("Generated new verification token", extra={
+        'action': 'generate_verification_token',
+        'user_id': current_user.id
+    })
+
     # Send verification email
     from backend.services.email_service import send_verification_email
     user_name = current_user.first_name or current_user.email.split('@')[0]
@@ -190,10 +407,22 @@ async def send_verification_email_endpoint(
     )
 
     if not email_sent:
+        logger.error("Failed to resend verification email", extra={
+            'action': 'resend_verification',
+            'user_id': current_user.id,
+            'email': current_user.email  # Will be redacted
+        })
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to send verification email"
         )
+
+    logger.info("Verification email resent successfully", extra={
+        'action': 'resend_verification',
+        'user_id': current_user.id,
+        'email': current_user.email  # Will be redacted
+    })
 
     return {
         "message": "Verification email sent successfully",
@@ -204,6 +433,7 @@ async def send_verification_email_endpoint(
 @router.get("/verify-email", response_model=MessageResponse)
 async def verify_email_endpoint(
         token: str,
+        request: Request,
         db: Session = Depends(get_db)
 ):
     """
@@ -212,10 +442,31 @@ async def verify_email_endpoint(
     Args:
         token: Email verification token (from email link)
     """
+    client_ip = request.client.host if request.client else "unknown"
+
+    logger.info("Email verification attempt", extra={
+        'action': 'verify_email',
+        'ip_address': client_ip
+    })
+
     # Verify the token
     email = verify_email_verification_token(token)
 
     if not email:
+        logger.warning("Email verification failed - invalid token", extra={
+            'action': 'verify_email',
+            'ip_address': client_ip,
+            'failure_reason': 'invalid_token'
+        })
+
+        log_security_event(
+            event_type="email_verification",
+            action="verify_email",
+            result="failure",
+            failure_reason="invalid_token",
+            ip_address=client_ip
+        )
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification token"
@@ -224,6 +475,13 @@ async def verify_email_endpoint(
     # Find user by email
     user = get_user_by_email(db, email)
     if not user:
+        logger.warning("Email verification failed - user not found", extra={
+            'action': 'verify_email',
+            'email': email,  # Will be redacted
+            'ip_address': client_ip,
+            'failure_reason': 'user_not_found'
+        })
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
@@ -231,6 +489,23 @@ async def verify_email_endpoint(
 
     # Check if token matches the one in database
     if user.email_verification_token != token:
+        logger.warning("Email verification failed - token mismatch", extra={
+            'action': 'verify_email',
+            'user_id': user.id,
+            'email': user.email,  # Will be redacted
+            'ip_address': client_ip,
+            'failure_reason': 'token_mismatch'
+        })
+
+        log_security_event(
+            event_type="email_verification",
+            action="verify_email",
+            result="failure",
+            failure_reason="token_mismatch",
+            user_id=user.id,
+            ip_address=client_ip
+        )
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid verification token"
@@ -238,6 +513,12 @@ async def verify_email_endpoint(
 
     # Check if already verified
     if user.is_verified:
+        logger.info("Email verification - already verified", extra={
+            'action': 'verify_email',
+            'user_id': user.id,
+            'email': user.email  # Will be redacted
+        })
+
         return {
             "message": "Email is already verified",
             "success": True
@@ -248,10 +529,40 @@ async def verify_email_endpoint(
     success = verify_user_email(db, user.id)
 
     if not success:
+        logger.error("Email verification failed - database error", extra={
+            'action': 'verify_email',
+            'user_id': user.id,
+            'email': user.email  # Will be redacted
+        })
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to verify email"
         )
+
+    # Log successful verification
+    logger.info("Email verification successful", extra={
+        'action': 'verify_email',
+        'user_id': user.id,
+        'email': user.email,  # Will be redacted
+        'ip_address': client_ip
+    })
+
+    log_security_event(
+        event_type="email_verification",
+        action="verify_email",
+        result="success",
+        user_id=user.id,
+        ip_address=client_ip
+    )
+
+    log_audit_event(
+        action="verify_user_email",
+        resource="user_account",
+        result="success",
+        user_id=user.id,
+        ip_address=client_ip
+    )
 
     return {
         "message": "Email verified successfully! Your account is now fully activated.",
@@ -268,15 +579,23 @@ async def get_verification_status(
 
     Requires: Valid JWT token
     """
+    logger.debug("Verification status checked", extra={
+        'action': 'check_verification_status',
+        'user_id': current_user.id,
+        'is_verified': current_user.is_verified
+    })
+
     return {
         "email": current_user.email,
         "is_verified": current_user.is_verified,
         "verification_sent_at": current_user.email_verification_sent_at.isoformat() if current_user.email_verification_sent_at else None
     }
 
+
 @router.post("/forgot-password", response_model=MessageResponse)
 async def forgot_password(
         request: PasswordReset,
+        http_request: Request,
         db: Session = Depends(get_db)
 ):
     """
@@ -288,6 +607,14 @@ async def forgot_password(
     Returns:
         Success message (always returns success to prevent email enumeration)
     """
+    client_ip = http_request.client.host if http_request.client else "unknown"
+
+    logger.info("Password reset requested", extra={
+        'action': 'forgot_password',
+        'email': request.email,  # Will be redacted
+        'ip_address': client_ip
+    })
+
     # Always return success message to prevent email enumeration attacks
     success_message = "If the email address exists, password reset instructions have been sent"
 
@@ -295,14 +622,43 @@ async def forgot_password(
     user = get_user_by_email(db, request.email)
 
     if not user:
-        # Don't reveal that email doesn't exist
+        logger.info("Password reset requested for non-existent email", extra={
+            'action': 'forgot_password',
+            'email': request.email,  # Will be redacted
+            'ip_address': client_ip,
+            'result': 'email_not_found'
+        })
+
+        log_security_event(
+            event_type="password_reset",
+            action="forgot_password",
+            result="email_not_found",
+            ip_address=client_ip,
+            email=request.email  # Will be redacted
+        )
+
         return {
             "message": success_message,
             "success": True
         }
 
     if not user.is_active:
-        # Don't reveal that account is inactive
+        logger.info("Password reset requested for inactive account", extra={
+            'action': 'forgot_password',
+            'user_id': user.id,
+            'email': user.email,  # Will be redacted
+            'ip_address': client_ip,
+            'result': 'account_inactive'
+        })
+
+        log_security_event(
+            event_type="password_reset",
+            action="forgot_password",
+            result="account_inactive",
+            user_id=user.id,
+            ip_address=client_ip
+        )
+
         return {
             "message": success_message,
             "success": True
@@ -316,7 +672,12 @@ async def forgot_password(
         token_saved = set_password_reset_token(db, user.id, reset_token)
 
         if not token_saved:
-            print(f"⚠️ Failed to save reset token for user {user.email}")
+            logger.warning("Failed to save password reset token", extra={
+                'action': 'forgot_password',
+                'user_id': user.id,
+                'email': user.email  # Will be redacted
+            })
+
             return {
                 "message": success_message,
                 "success": True
@@ -331,12 +692,43 @@ async def forgot_password(
         )
 
         if email_sent:
-            print(f"✅ Password reset email sent to {user.email}")
+            logger.info("Password reset email sent successfully", extra={
+                'action': 'forgot_password',
+                'user_id': user.id,
+                'email': user.email,  # Will be redacted
+                'ip_address': client_ip
+            })
+
+            log_security_event(
+                event_type="password_reset",
+                action="send_reset_email",
+                result="success",
+                user_id=user.id,
+                ip_address=client_ip
+            )
         else:
-            print(f"⚠️ Failed to send reset email to {user.email}")
+            logger.warning("Failed to send password reset email", extra={
+                'action': 'forgot_password',
+                'user_id': user.id,
+                'email': user.email  # Will be redacted
+            })
 
     except Exception as e:
-        print(f"❌ Error in forgot password for {request.email}: {e}")
+        logger.error("Error in forgot password process", extra={
+            'action': 'forgot_password',
+            'email': request.email,  # Will be redacted
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'ip_address': client_ip
+        })
+
+        log_security_event(
+            event_type="password_reset",
+            action="forgot_password",
+            result="error",
+            error_type=type(e).__name__,
+            ip_address=client_ip
+        )
 
     return {
         "message": success_message,
@@ -347,6 +739,7 @@ async def forgot_password(
 @router.post("/reset-password", response_model=MessageResponse)
 async def reset_password(
         request: PasswordResetConfirm,
+        http_request: Request,
         db: Session = Depends(get_db)
 ):
     """
@@ -358,10 +751,31 @@ async def reset_password(
     Returns:
         Success/error message
     """
+    client_ip = http_request.client.host if http_request.client else "unknown"
+
+    logger.info("Password reset confirmation attempt", extra={
+        'action': 'reset_password',
+        'ip_address': client_ip
+    })
+
     # Verify the reset token
     email = verify_password_reset_token(request.token)
 
     if not email:
+        logger.warning("Password reset failed - invalid token", extra={
+            'action': 'reset_password',
+            'ip_address': client_ip,
+            'failure_reason': 'invalid_token'
+        })
+
+        log_security_event(
+            event_type="password_reset",
+            action="reset_password",
+            result="failure",
+            failure_reason="invalid_token",
+            ip_address=client_ip
+        )
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset token"
@@ -371,6 +785,25 @@ async def reset_password(
     result = reset_password_with_token(db, request.token, request.new_password)
 
     if not result["success"]:
+        user = get_user_by_email(db, email)
+        user_id = user.id if user else None
+
+        logger.warning("Password reset failed - validation errors", extra={
+            'action': 'reset_password',
+            'user_id': user_id,
+            'email': email,  # Will be redacted
+            'errors': result["errors"],
+            'ip_address': client_ip
+        })
+
+        log_security_event(
+            event_type="password_reset",
+            action="reset_password",
+            result="validation_failure",
+            user_id=user_id,
+            ip_address=client_ip
+        )
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -379,14 +812,45 @@ async def reset_password(
             }
         )
 
+    # Get user for logging and notification
+    user = get_user_by_email(db, email)
+
+    # Log successful password reset
+    logger.info("Password reset completed successfully", extra={
+        'action': 'reset_password',
+        'user_id': user.id if user else None,
+        'email': email,  # Will be redacted
+        'ip_address': client_ip
+    })
+
+    log_security_event(
+        event_type="password_reset",
+        action="reset_password",
+        result="success",
+        user_id=user.id if user else None,
+        ip_address=client_ip
+    )
+
+    log_audit_event(
+        action="reset_user_password",
+        resource="user_account",
+        result="success",
+        user_id=user.id if user else None,
+        ip_address=client_ip
+    )
+
     # Send confirmation email
     try:
-        user = get_user_by_email(db, email)
         if user:
             user_name = user.first_name or user.email.split('@')[0]
             await send_password_changed_notification(user.email, user_name)
     except Exception as e:
-        print(f"⚠️ Failed to send password changed notification: {e}")
+        logger.warning("Failed to send password changed notification", extra={
+            'action': 'send_password_changed_notification',
+            'user_id': user.id if user else None,
+            'error_type': type(e).__name__,
+            'error_message': str(e)
+        })
 
     return {
         "message": "Password has been reset successfully. You can now log in with your new password.",
@@ -397,6 +861,7 @@ async def reset_password(
 @router.post("/forgot-username", response_model=MessageResponse)
 async def forgot_username(
         request: ForgotUsername,
+        http_request: Request,
         db: Session = Depends(get_db)
 ):
     """
@@ -408,6 +873,14 @@ async def forgot_username(
     Returns:
         Success message (always returns success to prevent email enumeration)
     """
+    client_ip = http_request.client.host if http_request.client else "unknown"
+
+    logger.info("Username recovery requested", extra={
+        'action': 'forgot_username',
+        'email': request.email,  # Will be redacted
+        'ip_address': client_ip
+    })
+
     # Always return success message to prevent email enumeration attacks
     success_message = "If the email address exists, username recovery instructions have been sent"
 
@@ -415,14 +888,43 @@ async def forgot_username(
     user = get_user_by_email(db, request.email)
 
     if not user:
-        # Don't reveal that email doesn't exist
+        logger.info("Username recovery requested for non-existent email", extra={
+            'action': 'forgot_username',
+            'email': request.email,  # Will be redacted
+            'ip_address': client_ip,
+            'result': 'email_not_found'
+        })
+
+        log_security_event(
+            event_type="username_recovery",
+            action="forgot_username",
+            result="email_not_found",
+            ip_address=client_ip,
+            email=request.email  # Will be redacted
+        )
+
         return {
             "message": success_message,
             "success": True
         }
 
     if not user.is_active:
-        # Don't reveal that account is inactive
+        logger.info("Username recovery requested for inactive account", extra={
+            'action': 'forgot_username',
+            'user_id': user.id,
+            'email': user.email,  # Will be redacted
+            'ip_address': client_ip,
+            'result': 'account_inactive'
+        })
+
+        log_security_event(
+            event_type="username_recovery",
+            action="forgot_username",
+            result="account_inactive",
+            user_id=user.id,
+            ip_address=client_ip
+        )
+
         return {
             "message": success_message,
             "success": True
@@ -440,12 +942,43 @@ async def forgot_username(
         )
 
         if email_sent:
-            print(f"✅ Username recovery email sent to {user.email}")
+            logger.info("Username recovery email sent successfully", extra={
+                'action': 'forgot_username',
+                'user_id': user.id,
+                'email': user.email,  # Will be redacted
+                'ip_address': client_ip
+            })
+
+            log_security_event(
+                event_type="username_recovery",
+                action="send_username_email",
+                result="success",
+                user_id=user.id,
+                ip_address=client_ip
+            )
         else:
-            print(f"⚠️ Failed to send username recovery email to {user.email}")
+            logger.warning("Failed to send username recovery email", extra={
+                'action': 'forgot_username',
+                'user_id': user.id,
+                'email': user.email  # Will be redacted
+            })
 
     except Exception as e:
-        print(f"❌ Error in username recovery for {request.email}: {e}")
+        logger.error("Error in username recovery process", extra={
+            'action': 'forgot_username',
+            'email': request.email,  # Will be redacted
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'ip_address': client_ip
+        })
+
+        log_security_event(
+            event_type="username_recovery",
+            action="forgot_username",
+            result="error",
+            error_type=type(e).__name__,
+            ip_address=client_ip
+        )
 
     return {
         "message": success_message,
@@ -456,6 +989,7 @@ async def forgot_username(
 @router.post("/change-password", response_model=MessageResponse)
 async def change_password_endpoint(
         request: PasswordChange,
+        http_request: Request,
         current_user: User = Depends(get_current_active_user),
         db: Session = Depends(get_db)
 ):
@@ -469,6 +1003,15 @@ async def change_password_endpoint(
     Returns:
         Success/error message
     """
+    client_ip = http_request.client.host if http_request.client else "unknown"
+
+    logger.info("Password change requested", extra={
+        'action': 'change_password',
+        'user_id': current_user.id,
+        'email': current_user.email,  # Will be redacted
+        'ip_address': client_ip
+    })
+
     # Change the password
     result = change_password(
         db,
@@ -478,6 +1021,23 @@ async def change_password_endpoint(
     )
 
     if not result["success"]:
+        logger.warning("Password change failed", extra={
+            'action': 'change_password',
+            'user_id': current_user.id,
+            'email': current_user.email,  # Will be redacted
+            'errors': result["errors"],
+            'ip_address': client_ip
+        })
+
+        log_security_event(
+            event_type="password_change",
+            action="change_password",
+            result="failure",
+            user_id=current_user.id,
+            ip_address=client_ip,
+            failure_reason="validation_failure"
+        )
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -486,12 +1046,41 @@ async def change_password_endpoint(
             }
         )
 
+    # Log successful password change
+    logger.info("Password changed successfully", extra={
+        'action': 'change_password',
+        'user_id': current_user.id,
+        'email': current_user.email,  # Will be redacted
+        'ip_address': client_ip
+    })
+
+    log_security_event(
+        event_type="password_change",
+        action="change_password",
+        result="success",
+        user_id=current_user.id,
+        ip_address=client_ip
+    )
+
+    log_audit_event(
+        action="change_user_password",
+        resource="user_account",
+        result="success",
+        user_id=current_user.id,
+        ip_address=client_ip
+    )
+
     # Send confirmation email
     try:
         user_name = current_user.first_name or current_user.email.split('@')[0]
         await send_password_changed_notification(current_user.email, user_name)
     except Exception as e:
-        print(f"⚠️ Failed to send password changed notification: {e}")
+        logger.warning("Failed to send password changed notification", extra={
+            'action': 'send_password_changed_notification',
+            'user_id': current_user.id,
+            'error_type': type(e).__name__,
+            'error_message': str(e)
+        })
 
     return {
         "message": "Password has been changed successfully.",

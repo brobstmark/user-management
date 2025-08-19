@@ -316,142 +316,154 @@
     </div>
 
     <script>
-        const API_BASE_URL = 'http://localhost:8000/api/v1';
+      // Cookie-based session (no localStorage token). Add CSRF only for POSTs.
+      const API_BASE_URL = 'http://localhost:8000/api/v1';
 
-        // Check authentication and load user data
-        window.addEventListener('load', async function() {
-            const token = localStorage.getItem('access_token');
+      // --- helpers ---
+      function getCookie(name) {
+        return document.cookie
+          .split('; ')
+          .find(row => row.startsWith(name + '='))?.split('=')[1];
+      }
 
-            if (!token) {
-                window.location.href = '../auth/login.html';
-                return;
-            }
+      async function getCsrfToken() {
+        let token = getCookie('csrftoken');
+        if (token) return token;
+        try {
+          const res = await fetch(`${API_BASE_URL}/auth/csrf-token`, { credentials: 'include' });
+          if (!res.ok) return null;
+          const data = await res.json().catch(() => ({}));
+          token = data.csrf_token || getCookie('csrftoken') || null;
+          return token;
+        } catch { return null; }
+      }
 
-            try {
-                await loadUserProfile();
-                await checkEmailVerification();
+      async function apiGet(path) {
+        return fetch(`${API_BASE_URL}${path}`, { credentials: 'include' });
+      }
 
-                document.getElementById('loadingSection').style.display = 'none';
-                document.getElementById('dashboardContent').style.display = 'block';
-            } catch (error) {
-                console.error('Failed to load dashboard:', error);
-                if (error.message.includes('401')) {
-                    logout();
-                }
-            }
+      async function apiPost(path, body) {
+        const csrf = await getCsrfToken();
+        const headers = { 'Content-Type': 'application/json' };
+        if (csrf) headers['X-CSRF-Token'] = csrf;
+        return fetch(`${API_BASE_URL}${path}`, {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: body ? JSON.stringify(body) : null
         });
+      }
 
-        async function loadUserProfile() {
-            const token = localStorage.getItem('access_token');
+      function redirectToLoginOnce() {
+        if (sessionStorage.getItem('redirLogin')) return;
+        sessionStorage.setItem('redirLogin', '1');
+        window.location.href = '../auth/login.html';
+      }
 
-            const response = await fetch(`${API_BASE_URL}/users/me`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
+      // --- page boot ---
+      window.addEventListener('load', async () => {
+        // 1) Are we authenticated (via cookie)?
+        const authRes = await apiGet('/auth/auth-status');
+        if (!authRes.ok) return redirectToLoginOnce();
 
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+        // 2) Load profile
+        try {
+          const resp = await apiGet('/users/me');
+          if (resp.status === 401) return redirectToLoginOnce();
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const user = await resp.json();
+
+          // Update header bits
+          document.getElementById('userEmail').textContent = user.email || '—';
+          const displayName = user.full_name || user.email?.split('@')[0] || 'User';
+          document.getElementById('welcomeName').textContent = displayName;
+          document.getElementById('userAvatar').textContent = (displayName[0] || 'U').toUpperCase();
+
+          // Dates / stats
+          const created = user.created_at ? new Date(user.created_at) : null;
+          document.getElementById('memberSince').textContent = created ? created.toLocaleDateString() : '—';
+          document.getElementById('profileStatus').textContent = user.is_active ? 'Active' : 'Inactive';
+
+          // Profile grid (same layout, just fill values)
+          const profileGrid = document.getElementById('profileGrid');
+          profileGrid.innerHTML = `
+            <div class="profile-item">
+              <span class="profile-label">Email:</span>
+              <span class="profile-value">${user.email ?? '—'}</span>
+            </div>
+            <div class="profile-item">
+              <span class="profile-label">Full Name:</span>
+              <span class="profile-value">${user.full_name ?? 'Not set'}</span>
+            </div>
+            <div class="profile-item">
+              <span class="profile-label">Phone:</span>
+              <span class="profile-value">${user.phone_number ?? 'Not set'}</span>
+            </div>
+            <div class="profile-item">
+              <span class="profile-label">Account Status:</span>
+              <span class="profile-value">
+                <span class="status-badge ${user.is_active ? 'status-verified' : 'status-pending'}">
+                  ${user.is_active ? 'Active' : 'Inactive'}
+                </span>
+              </span>
+            </div>
+          `;
+
+          // Email verification badge
+          try {
+            const v = await apiGet('/auth/verification-status');
+            if (v.ok) {
+              const data = await v.json().catch(() => ({}));
+              const el = document.getElementById('emailStatus');
+              if (data.is_verified === true) {
+                el.textContent = 'Verified ✅';
+                el.style.color = '#28a745';
+              } else if (data.is_verified === false) {
+                el.textContent = 'Pending ⏳';
+                el.style.color = '#ffc107';
+              } else {
+                el.textContent = 'Unknown';
+              }
             }
+          } catch { /* ignore */ }
 
-            const user = await response.json();
-
-            // Update UI with user data
-            document.getElementById('userEmail').textContent = user.email;
-            document.getElementById('welcomeName').textContent = user.full_name || user.email.split('@')[0];
-            document.getElementById('userAvatar').textContent = (user.full_name || user.email)[0].toUpperCase();
-
-            // Format member since date
-            const createdDate = new Date(user.created_at);
-            document.getElementById('memberSince').textContent = createdDate.toLocaleDateString();
-
-            // Update profile grid
-            const profileGrid = document.getElementById('profileGrid');
-            profileGrid.innerHTML = `
-                <div class="profile-item">
-                    <span class="profile-label">Email:</span>
-                    <span class="profile-value">${user.email}</span>
-                </div>
-                <div class="profile-item">
-                    <span class="profile-label">Full Name:</span>
-                    <span class="profile-value">${user.full_name || 'Not set'}</span>
-                </div>
-                <div class="profile-item">
-                    <span class="profile-label">Phone:</span>
-                    <span class="profile-value">${user.phone_number || 'Not set'}</span>
-                </div>
-                <div class="profile-item">
-                    <span class="profile-label">Account Status:</span>
-                    <span class="profile-value">
-                        <span class="status-badge ${user.is_active ? 'status-verified' : 'status-pending'}">
-                            ${user.is_active ? 'Active' : 'Inactive'}
-                        </span>
-                    </span>
-                </div>
-            `;
+          // Show dashboard
+          document.getElementById('loadingSection').style.display = 'none';
+          document.getElementById('dashboardContent').style.display = 'block';
+        } catch (e) {
+          redirectToLoginOnce();
         }
+      });
 
-        async function checkEmailVerification() {
-            const token = localStorage.getItem('access_token');
+      // --- button handlers (match your existing onclick=...) ---
+      async function resendVerification() {
+        try {
+          const res = await apiPost('/auth/send-verification');
+          if (res.ok) alert('✅ Verification email sent! Check your inbox.');
+          else alert('❌ Failed to send verification email. Please try again.');
+        } catch { alert('❌ Network error. Please try again.'); }
+      }
 
-            try {
-                const response = await fetch(`${API_BASE_URL}/auth/verification-status`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
+      function editProfile() {
+        alert('Profile editing will be implemented in the next phase!');
+      }
 
-                if (response.ok) {
-                    const data = await response.json();
-                    const statusElement = document.getElementById('emailStatus');
+      function changePassword() {
+        alert('Password change will be implemented in the next phase!');
+      }
 
-                    if (data.is_verified) {
-                        statusElement.textContent = 'Verified ✅';
-                        statusElement.style.color = '#28a745';
-                    } else {
-                        statusElement.textContent = 'Pending ⏳';
-                        statusElement.style.color = '#ffc107';
-                    }
-                }
-            } catch (error) {
-                document.getElementById('emailStatus').textContent = 'Unknown';
-            }
-        }
+      async function logout() {
+        try { await apiPost('/auth/logout'); } catch {}
+        sessionStorage.removeItem('redirLogin');
+        window.location.href = '../auth/login.html';
+      }
 
-        function logout() {
-            localStorage.removeItem('access_token');
-            localStorage.removeItem('user_email');
-            window.location.href = '../auth/login.html';
-        }
-
-        function editProfile() {
-            alert('Profile editing will be implemented in the next phase!');
-        }
-
-        function changePassword() {
-            alert('Password change will be implemented in the next phase!');
-        }
-
-        async function resendVerification() {
-            const token = localStorage.getItem('access_token');
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/auth/send-verification`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-
-                if (response.ok) {
-                    alert('✅ Verification email sent! Check your inbox.');
-                } else {
-                    alert('❌ Failed to send verification email. Please try again.');
-                }
-            } catch (error) {
-                alert('❌ Network error. Please try again.');
-            }
-        }
+      // expose globals for the existing HTML
+      window.resendVerification = resendVerification;
+      window.editProfile = editProfile;
+      window.changePassword = changePassword;
+      window.logout = logout;
     </script>
+
 </body>
 </html>

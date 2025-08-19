@@ -28,21 +28,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         self.csrf_tokens = {}  # In production, use Redis or database
         self.last_cleanup = time.time()
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # Process the request
+    async def dispatch(self, request, call_next):
+        # 1) CSRF at the door for state-changing API calls
+        if request.method in {"POST", "PUT", "DELETE", "PATCH"} and request.url.path.startswith("/api/"):
+            await self._handle_csrf_protection(request)  # note: no 'response' arg
+
+        # 2) Only then let the request in
         response = await call_next(request)
 
-        # Add security headers to all responses
+        # 3) Add security headers, cleanups, etc.
         self._add_security_headers(response, request)
-
-        # Handle CSRF protection for state-changing requests
-        if request.method in ["POST", "PUT", "DELETE", "PATCH"]:
-            if request.url.path.startswith("/api/"):
-                await self._handle_csrf_protection(request, response)
-
-        # Clean up expired CSRF tokens periodically
         self._cleanup_expired_tokens()
-
         return response
 
     def _add_security_headers(self, response: Response, request: Request):
@@ -94,21 +90,21 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if settings.ENVIRONMENT != "production":
             response.headers["X-Debug-Mode"] = "true"
 
-    async def _handle_csrf_protection(self, request: Request, response: Response):
+    async def _handle_csrf_protection(self, request: Request):
         """Handle CSRF protection for state-changing requests"""
 
-        # Skip CSRF for login endpoint (we'll handle it differently)
-        if request.url.path == "/api/v1/auth/login":
-            return
 
-        # Skip CSRF for registration (public endpoint)
-        if request.url.path == "/api/v1/auth/register":
+        CSRF_EXEMPT_PATHS = {
+            "/api/v1/auth/login",
+            "/api/v1/auth/register",
+            "/api/v1/auth/forgot-password",
+            "/api/v1/auth/reset-password",
+            "/api/v1/health",
+            "/api/config",
+            "/api/v1/logs/frontend",  # <— add this
+        }
+        if request.url.path in CSRF_EXEMPT_PATHS:
             return
-
-        # Skip CSRF for password reset requests (public endpoints)
-        if request.url.path in ["/api/v1/auth/forgot-password", "/api/v1/auth/reset-password"]:
-            return
-
         # Get CSRF token from cookie
         csrf_token = request.cookies.get("csrf_token")
 

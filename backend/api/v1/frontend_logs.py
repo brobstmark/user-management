@@ -6,8 +6,11 @@ Integrates frontend logs with existing secure backend logging system
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
 from pydantic import BaseModel, Field, validator
 from sqlalchemy.orm import Session
+import inspect
 
 from backend.config.database import get_db
 from backend.core.dependencies import get_current_user
@@ -26,7 +29,50 @@ router = APIRouter()
 auth_logger = get_auth_logger()
 security_logger = get_security_logger()
 api_logger = get_api_logger()
+security_optional = HTTPBearer(auto_error=False)  # no error if header is missing
 
+RESERVED_LOGRECORD_KEYS = {
+    "name","msg","args","levelname","levelno",
+    "pathname","filename","module","lineno","funcName",
+    "created","msecs","relativeCreated","thread","threadName",
+    "process","processName","stack_info","exc_info","exc_text","asctime"
+}
+
+def safe_client_extra(d: dict) -> dict:
+    """Wrap/rename client fields so they don't collide with Python logging."""
+    clean = {}
+    for k, v in d.items():
+        if k in ("level", "message"):  # those are used by your logger call
+            continue
+        new_key = f"client_{k}" if k in RESERVED_LOGRECORD_KEYS else k
+        if isinstance(v, (str, int, float, bool)) or v is None:
+            clean[new_key] = v
+        else:
+            clean[new_key] = str(v)
+    return {"client": clean}
+
+async def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
+    db: Session = Depends(get_db),
+):
+    """
+    Return the current user if an Authorization header is present & valid.
+    If there's no header (anonymous page), return None.
+    """
+    if credentials is None:
+        return None
+
+    try:
+        # Call your existing helper with the *credentials*, not the request
+        result = get_current_user(credentials=credentials, db=db)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+    except HTTPException as e:
+        # If token is missing/invalid, treat it as anonymous
+        if e.status_code in (401, 403):
+            return None
+        raise
 
 class FrontendLogEntry(BaseModel):
     """Frontend log entry schema with validation"""
@@ -74,115 +120,215 @@ class LogResponse(BaseModel):
 
 @router.post("/frontend", response_model=LogResponse, status_code=status.HTTP_200_OK)
 async def submit_frontend_logs(
-        log_batch: FrontendLogBatch,
-        request: Request,
-        db: Session = Depends(get_db),
-        current_user: Optional[User] = Depends(get_current_user)
-        # Optional - some logs may be from unauthenticated users
+    log_batch: FrontendLogBatch,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """
-    Submit frontend logs to backend logging system
-
-    Integrates with existing secure logging infrastructure:
-    - Uses existing PII redaction and security filters
-    - Routes to appropriate log types (auth, security, api)
-    - Maintains audit trail for security events
-    - Rate limiting and validation built-in
+    Accepts frontend log batches (works for anonymous users).
+    Never throws to the client; logs internally and returns a summary.
+    Adds two guardrails:
+      - Origin allowlist (blocks cross-site spam)
+      - Batch size cap (prevents flooding)
     """
-    client_ip = request.client.host if request.client else "unknown"
-    user_id = current_user.id if current_user else None
-    user_email = current_user.email if current_user else None
 
-    # Log the incoming frontend log submission
+    # ---------- helpers (scoped locally so this is truly copy-paste) ----------
+    RESERVED_LOGRECORD_KEYS = {
+        "name", "msg", "args", "levelname", "levelno",
+        "pathname", "filename", "module", "lineno", "funcName",
+        "created", "msecs", "relativeCreated", "thread", "threadName",
+        "process", "processName", "stack_info", "exc_info", "exc_text", "asctime",
+    }
+
+    def safe_client_extra(d: dict) -> dict:
+        """
+        Make client payload safe for Python logging:
+        - rename keys that collide with LogRecord fields (e.g., 'module')
+        - coerce non-primitive values to string
+        - nest everything under 'client' to avoid top-level collisions
+        - skip message/level duplicates
+        """
+        cleaned = {}
+        for k, v in (d or {}).items():
+            if k in ("message", "level"):
+                continue
+            new_k = f"client_{k}" if k in RESERVED_LOGRECORD_KEYS else k
+            if isinstance(v, (str, int, float, bool)) or v is None:
+                cleaned[new_k] = v
+            else:
+                cleaned[new_k] = str(v)
+        return {"client": cleaned}
+    # -------------------------------------------------------------------------
+
+    client_ip = request.client.host if request.client else "unknown"
+    request_ua = (request.headers.get("user-agent") or "Unknown")[:200]
+    user_id = current_user.id if current_user else None
+    # user_email reserved if you wish to include later
+
+    # ---------- A) Origin allowlist: only accept from your own site(s) ----------
+    try:
+        from urllib.parse import urlparse
+        from backend.config.settings import settings
+
+        allowed_origins = set()
+        for url in (getattr(settings, "FRONTEND_URL", None), getattr(settings, "API_URL", None)):
+            if url:
+                pu = urlparse(url)
+                if pu.scheme and pu.netloc:
+                    allowed_origins.add(f"{pu.scheme}://{pu.netloc}")
+
+        # Helpful for local dev; remove if you prefer stricter policy
+        allowed_origins.update({"http://localhost:8000", "http://127.0.0.1:8000"})
+
+        # Prefer Origin, fall back to Referer (origin portion)
+        hdr_origin = request.headers.get("origin")
+        if not hdr_origin:
+            ref = request.headers.get("referer")
+            if ref:
+                pr = urlparse(ref)
+                if pr.scheme and pr.netloc:
+                    hdr_origin = f"{pr.scheme}://{pr.netloc}"
+
+        if hdr_origin and hdr_origin not in allowed_origins:
+            api_logger.warning("Dropped frontend logs from disallowed origin", extra={
+                "action": "frontend_log_dropped_origin",
+                "origin": hdr_origin,
+                "allowed": list(allowed_origins),
+                "ip_address": client_ip,
+            })
+            return LogResponse(success=True, processed_count=0, message="Dropped by origin policy")
+    except Exception as e:
+        # Never let policy evaluation break the endpoint
+        api_logger.warning("Origin policy evaluation failed", extra={
+            "action": "frontend_origin_policy_error",
+            "error_type": type(e).__name__,
+            "error_message": str(e)[:300],
+            "ip_address": client_ip,
+        })
+
+    # Envelope log for the batch
     api_logger.info("Frontend log batch received", extra={
-        'action': 'frontend_log_submission',
-        'log_count': len(log_batch.logs),
-        'user_id': user_id,
-        'ip_address': client_ip,
-        'user_agent': request.headers.get('user-agent', 'Unknown')[:200],
-        'source': 'frontend_logging_endpoint'
+        "action": "frontend_log_submission",
+        "log_count": len(log_batch.logs or []),
+        "user_id": user_id,
+        "ip_address": client_ip,
+        "user_agent": request_ua,
+        "source": "frontend_logging_endpoint",
     })
 
     processed_count = 0
+    failed_count = 0
 
-    try:
-        for log_entry in log_batch.logs:
-            # Determine which logger to use based on log context and content
-            logger_type = _determine_logger_type(log_entry)
+    # ---------- B) Batch size cap ----------
+    MAX_BATCH = 200  # adjust as you like
+    entries = list(log_batch.logs or [])
+    if len(entries) > MAX_BATCH:
+        api_logger.warning("Trimming oversized frontend log batch", extra={
+            "action": "frontend_log_batch_trim",
+            "original_count": len(entries),
+            "trimmed_to": MAX_BATCH,
+            "user_id": user_id,
+            "ip_address": client_ip,
+        })
+        entries = entries[:MAX_BATCH]
+
+    # Process each log entry safely
+    for entry in entries:
+        try:
+            # Choose destination logger (fallback to 'api')
+            try:
+                logger_type = _determine_logger_type(entry)
+            except Exception:
+                logger_type = "api"
             logger = _get_logger_by_type(logger_type)
 
-            # Prepare log context with frontend-specific information
-            log_context = {
-                'source': 'frontend',
-                'frontend_url': log_entry.url,
-                'frontend_session_id': log_entry.session_id,
-                'user_id': user_id,
-                'ip_address': client_ip,
-                'user_agent': log_entry.user_agent,
-                'frontend_timestamp': log_entry.timestamp,
-                **log_entry.context  # Include original context
+            # Build safe "extra" payload
+            base_extra = {
+                "source": "frontend",
+                "user_id": user_id,
+                "ip_address": client_ip,
+                "user_agent": (entry.user_agent or request_ua)[:200],
+            }
+            client_payload = {
+                "url": entry.url,
+                "session_id": entry.session_id,
+                "timestamp": entry.timestamp,
+                **(entry.context or {}),
             }
 
-            # Remove sensitive fields that shouldn't be in context
-            _sanitize_log_context(log_context)
+            # Keep your sanitizer, but never let it crash
+            try:
+                _sanitize_log_context(client_payload)
+            except Exception:
+                pass
 
-            # Log using appropriate level
-            log_level = log_entry.level.upper()
-            if log_level in ['DEBUG']:
-                logger.debug(log_entry.message, extra=log_context)
-            elif log_level in ['INFO']:
-                logger.info(log_entry.message, extra=log_context)
-            elif log_level in ['WARN', 'WARNING']:
-                logger.warning(log_entry.message, extra=log_context)
-            elif log_level in ['ERROR']:
-                logger.error(log_entry.message, extra=log_context)
-            elif log_level in ['CRITICAL']:
-                logger.critical(log_entry.message, extra=log_context)
+            safe_extra = {**base_extra, **safe_client_extra(client_payload)}
 
-            # Handle special log types that need additional processing
-            _handle_special_log_types(log_entry, log_context, user_id, client_ip)
+            # Message + level (with safe defaults + truncation)
+            msg = str(getattr(entry, "message", "") or "frontend_log").strip()
+            if len(msg) > 2000:
+                msg = msg[:2000]
+
+            lvl = str(getattr(entry, "level", "INFO") or "INFO").upper()
+            if lvl == "DEBUG":
+                logger.debug(msg, extra=safe_extra)
+            elif lvl in ("WARN", "WARNING"):
+                logger.warning(msg, extra=safe_extra)
+            elif lvl == "ERROR":
+                logger.error(msg, extra=safe_extra)
+            elif lvl == "CRITICAL":
+                logger.critical(msg, extra=safe_extra)
+            else:
+                logger.info(msg, extra=safe_extra)
+
+            # Optional special handling; swallow its failures
+            try:
+                _handle_special_log_types(entry, safe_extra, user_id, client_ip)
+            except Exception as e2:
+                api_logger.warning("Frontend log special handler failed", extra={
+                    "action": "frontend_log_special_handler_error",
+                    "user_id": user_id,
+                    "ip_address": client_ip,
+                    "error_type": type(e2).__name__,
+                    "error_message": str(e2)[:500],
+                    **safe_client_extra({"handler_error": str(e2)[:200]}),
+                })
 
             processed_count += 1
 
-    except Exception as e:
-        # Log the error in processing frontend logs
-        api_logger.error("Error processing frontend logs", extra={
-            'action': 'frontend_log_processing_error',
-            'user_id': user_id,
-            'ip_address': client_ip,
-            'error_type': type(e).__name__,
-            'error_message': str(e),
-            'processed_count': processed_count,
-            'total_logs': len(log_batch.logs)
-        })
+        except Exception as e:
+            failed_count += 1
+            api_logger.error("Error processing individual frontend log", extra={
+                "action": "frontend_log_processing_error",
+                "user_id": user_id,
+                "ip_address": client_ip,
+                "error_type": type(e).__name__,
+                "error_message": str(e)[:500],
+                "processed_count": processed_count,
+                "failed_count": failed_count,
+                **safe_client_extra({"exception": str(e)[:200]}),
+            })
+            # keep going
 
-        log_security_event(
-            event_type="frontend_logging",
-            action="log_processing",
-            result="error",
-            user_id=user_id,
-            ip_address=client_ip,
-            error_type=type(e).__name__
-        )
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error processing logs"
-        )
-
-    # Log successful processing
-    api_logger.info("Frontend logs processed successfully", extra={
-        'action': 'frontend_log_processing_complete',
-        'processed_count': processed_count,
-        'user_id': user_id,
-        'ip_address': client_ip
+    # Batch summary
+    result_msg = f"Processed {processed_count} log(s)" + (f", {failed_count} failed" if failed_count else "")
+    api_logger.info("Frontend logs processed", extra={
+        "action": "frontend_log_processing_complete",
+        "processed_count": processed_count,
+        "failed_count": failed_count,
+        "user_id": user_id,
+        "ip_address": client_ip,
     })
 
+    # Mailbox behavior: always succeed to the client
     return LogResponse(
-        success=True,
+        success=(failed_count == 0),
         processed_count=processed_count,
-        message=f"Successfully processed {processed_count} log entries"
+        message=result_msg,
     )
+
+
 
 
 def _determine_logger_type(log_entry: FrontendLogEntry) -> str:

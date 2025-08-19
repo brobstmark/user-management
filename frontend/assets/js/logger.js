@@ -502,4 +502,3 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 });
 
-export default SecureFrontendLogger;

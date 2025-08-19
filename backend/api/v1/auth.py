@@ -29,6 +29,11 @@ from backend.crud.user import set_password_reset_token, reset_password_with_toke
 from backend.core.security import create_password_reset_token, verify_password_reset_token
 from backend.services.email_service import send_password_reset_email, send_username_recovery_email, \
     send_password_changed_notification
+from backend.core.middleware import generate_csrf_token
+from fastapi.responses import JSONResponse
+from fastapi import Response
+from fastapi.responses import JSONResponse
+
 
 # 🔥 Import secure logging system
 from backend.utils.logging import (
@@ -173,19 +178,20 @@ async def register_user(
     return user
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=MessageResponse)  # Changed from TokenResponse
 async def login_user(
         login_data: UserLogin,
         request: Request,
+        response: Response,
         db: Session = Depends(get_db)
 ):
     """
-    User login endpoint
+    User login endpoint with httpOnly cookie authentication
 
     - **email**: User's email address
     - **password**: User's password
 
-    Returns JWT access token for authentication
+    Returns success message and sets httpOnly authentication cookie
     """
     # Get client IP for security logging
     client_ip = request.client.host if request.client else "unknown"
@@ -218,8 +224,7 @@ async def login_user(
 
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail="Incorrect email or password"
         )
 
     # Verify password
@@ -244,8 +249,7 @@ async def login_user(
 
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail="Incorrect email or password"
         )
 
     # Check if user is active
@@ -282,6 +286,16 @@ async def login_user(
         expires_delta=access_token_expires
     )
 
+    # Set httpOnly authentication cookie
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # Convert to seconds
+        httponly=True,  # Critical: prevents JavaScript access
+        secure=settings.ENVIRONMENT == "production",  # HTTPS only in production
+        samesite="strict"  # CSRF protection
+    )
+
     # Log successful login
     logger.info("Login successful", extra={
         'action': 'login',
@@ -309,23 +323,20 @@ async def login_user(
     )
 
     return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60  # Convert to seconds
+        "message": "Login successful",
+        "success": True,
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60  # For frontend reference
     }
 
 
 @router.post("/logout", response_model=MessageResponse)
 async def logout_user(
         request: Request,
+        response: Response,
         current_user: User = Depends(get_current_active_user)
 ):
     """
-    User logout endpoint
-
-    Note: With JWT tokens, logout is typically handled client-side
-    by removing the token. This endpoint is provided for consistency
-    and can be extended for token blacklisting if needed.
+    User logout endpoint - clears authentication cookie
     """
     client_ip = request.client.host if request.client else "unknown"
 
@@ -335,6 +346,14 @@ async def logout_user(
         'email': current_user.email,  # Will be redacted
         'ip_address': client_ip
     })
+
+    # Clear authentication cookie
+    response.delete_cookie(
+        key="access_token",
+        httponly=True,
+        secure=settings.ENVIRONMENT == "production",
+        samesite="strict"
+    )
 
     log_audit_event(
         action="user_logout",
@@ -349,6 +368,55 @@ async def logout_user(
         "success": True
     }
 
+
+@router.get("/auth-status", response_model=dict)
+async def get_auth_status(
+        request: Request,
+        current_user: User = Depends(get_current_active_user)
+):
+    """
+    Check current authentication status
+
+    Requires: Valid authentication cookie
+    """
+    logger.debug("Authentication status checked", extra={
+        'action': 'check_auth_status',
+        'user_id': current_user.id,
+        'is_verified': current_user.is_verified
+    })
+
+    return {
+        "authenticated": True,
+        "user": {
+            "id": current_user.id,
+            "email": current_user.email,
+            "first_name": current_user.first_name,
+            "last_name": current_user.last_name,
+            "is_verified": current_user.is_verified,
+            "is_active": current_user.is_active
+        }
+    }
+
+@router.get("/csrf-token", response_model=dict)
+async def get_csrf_token(request: Request):
+    """Generate and return CSRF token"""
+    csrf_token = generate_csrf_token()
+
+    response = JSONResponse({
+        "csrf_token": csrf_token,
+        "message": "CSRF token generated"
+    })
+
+    response.set_cookie(
+        key="csrf_token",
+        value=csrf_token,
+        max_age=7200,  # 2 hours
+        httponly=True,
+        secure=settings.ENVIRONMENT == "production",
+        samesite="strict"
+    )
+
+    return response
 
 @router.post("/send-verification", response_model=MessageResponse)
 async def send_verification_email_endpoint(

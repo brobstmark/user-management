@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from backend.core.middleware import SecurityHeadersMiddleware, InputSanitizationMiddleware, generate_csrf_token
 
 from backend.config.settings import settings
 from backend.api.v1.router import api_router
@@ -186,11 +187,11 @@ app = FastAPI(
     debug=settings.DEBUG
 )
 
-# Get loggers
+# Get loggers (initialize first)
 startup_logger = get_api_logger()
 security_logger = get_security_logger()
 
-# CORS middleware with dynamic origins
+# CORS middleware with dynamic origins (ADD FIRST - executes last)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
@@ -199,7 +200,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add security logging middleware
+# Add security headers middleware (ADD SECOND - executes third)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Add input sanitization middleware (ADD THIRD - executes second)
+app.add_middleware(InputSanitizationMiddleware)
+
+# Add security logging middleware (ADD LAST - executes first)
 app.add_middleware(
     SecurityLoggingMiddleware,
     log_requests=True

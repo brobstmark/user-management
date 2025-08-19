@@ -1,23 +1,55 @@
 /**
- * Secure Authentication JavaScript for User Management System
- * Enhanced with security fixes and logging integration
+ * Secure Authentication JavaScript - Cookie-Based with CSRF Protection
+ * Updated to use httpOnly cookies and CSRF tokens
  */
 
 // 🔒 Secure Auth utility object
 const Auth = {
 
+    // Current CSRF token
+    csrfToken: null,
+
     // Initialize authentication functionality
-    init() {
+    async init() {
         this.setupFormHandlers();
-        this.checkAuthStatus();
+        await this.initCSRF();
+        await this.checkAuthStatus();
         this.setupSecurityMonitoring();
 
         // 🔒 Log initialization
         if (window.logInfo) {
             window.logInfo('Authentication module initialized', {
                 module: 'auth',
-                has_token: this.isAuthenticated()
+                csrf_enabled: !!this.csrfToken
             });
+        }
+    },
+
+    // Initialize CSRF protection
+    async initCSRF() {
+        try {
+            const response = await window.AppConfig.apiRequest('/auth/csrf-token', {
+                method: 'GET',
+                credentials: 'same-origin'  // Include cookies
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                this.csrfToken = data.csrf_token;
+
+                if (window.logInfo) {
+                    window.logInfo('CSRF token initialized', {
+                        action: 'csrf_init'
+                    });
+                }
+            }
+        } catch (error) {
+            if (window.logError) {
+                window.logError('Failed to initialize CSRF token', {
+                    error_type: error.name,
+                    action: 'csrf_init'
+                });
+            }
         }
     },
 
@@ -51,90 +83,82 @@ const Auth = {
         this.setupValidation();
     },
 
-    // 🔒 Secure token storage with sessionStorage (more secure than localStorage)
-    setToken(token) {
-        try {
-            // Use sessionStorage instead of localStorage for better security
-            sessionStorage.setItem('access_token', token);
-
-            // 🔒 Log token storage (token will be redacted)
-            if (window.logAuthEvent) {
-                window.logAuthEvent('token_stored', {
-                    action: 'store_token',
-                    storage_type: 'sessionStorage'
-                });
-            }
-        } catch (error) {
-            // Handle storage quota exceeded
-            if (window.logError) {
-                window.logError('Failed to store authentication token', {
-                    error_type: error.name,
-                    storage_type: 'sessionStorage'
-                });
-            }
-            throw new Error('Unable to store authentication token');
-        }
-    },
-
-    // 🔒 Secure token retrieval
-    getToken() {
-        try {
-            return sessionStorage.getItem('access_token');
-        } catch (error) {
-            if (window.logError) {
-                window.logError('Failed to retrieve authentication token', {
-                    error_type: error.name
-                });
-            }
-            return null;
-        }
-    },
-
-    // 🔒 Secure token removal
-    removeToken() {
-        try {
-            sessionStorage.removeItem('access_token');
-            sessionStorage.removeItem('user_email');
-
-            // 🔒 Log token removal
-            if (window.logAuthEvent) {
-                window.logAuthEvent('token_removed', {
-                    action: 'remove_token',
-                    reason: 'logout'
-                });
-            }
-        } catch (error) {
-            if (window.logError) {
-                window.logError('Failed to remove authentication token', {
-                    error_type: error.name
-                });
-            }
-        }
-    },
-
-    // Check if user is authenticated
-    checkAuthStatus() {
-        const token = this.getToken();
+    // 🔒 Check authentication status using backend endpoint
+    async checkAuthStatus() {
         const currentPage = window.location.pathname;
 
-        // 🔒 Log authentication check
-        if (window.logInfo) {
-            window.logInfo('Authentication status checked', {
-                has_token: !!token,
-                page: currentPage.split('/').pop()
+        try {
+            const response = await window.AppConfig.apiRequest('/auth/auth-status', {
+                method: 'GET',
+                credentials: 'same-origin'  // Include httpOnly cookies
             });
+
+            const isAuthenticated = response.ok;
+
+            // 🔒 Log authentication check
+            if (window.logInfo) {
+                window.logInfo('Authentication status checked', {
+                    authenticated: isAuthenticated,
+                    page: currentPage.split('/').pop()
+                });
+            }
+
+            // If on login/register page and already authenticated, redirect to dashboard
+            if (isAuthenticated && (currentPage.includes('login.html') || currentPage.includes('register.html'))) {
+                this.secureRedirect('../user/dashboard.html');
+            }
+
+            // If on protected page and not authenticated, redirect to login
+            if (!isAuthenticated && currentPage.includes('dashboard.html')) {
+                this.secureRedirect('../auth/login.html');
+            }
+
+            return isAuthenticated;
+
+        } catch (error) {
+            // Not authenticated or connection error
+            if (window.logInfo) {
+                window.logInfo('Authentication check failed', {
+                    error_type: error.name,
+                    page: currentPage.split('/').pop()
+                });
+            }
+
+            // If on protected page, redirect to login
+            if (currentPage.includes('dashboard.html')) {
+                this.secureRedirect('../auth/login.html');
+            }
+
+            return false;
+        }
+    },
+
+    // 🔒 Create authenticated request with CSRF token
+    async authenticatedRequest(endpoint, options = {}) {
+        const requestOptions = {
+            ...options,
+            credentials: 'same-origin',  // Include httpOnly cookies
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        };
+
+        // Add CSRF token for state-changing requests
+        if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(options.method?.toUpperCase())) {
+            if (this.csrfToken) {
+                requestOptions.headers['X-CSRF-Token'] = this.csrfToken;
+            } else {
+                // Try to get CSRF token if we don't have one
+                await this.initCSRF();
+                if (this.csrfToken) {
+                    requestOptions.headers['X-CSRF-Token'] = this.csrfToken;
+                }
+            }
         }
 
-        // If on login/register page and already authenticated, redirect to dashboard
-        if (token && (currentPage.includes('login.html') || currentPage.includes('register.html'))) {
-            // 🔒 Prevent open redirects by using relative paths only
-            this.secureRedirect('../user/dashboard.html');
-        }
-
-        // If on protected page and not authenticated, redirect to login
-        if (!token && currentPage.includes('dashboard.html')) {
-            this.secureRedirect('../auth/login.html');
-        }
+        return window.AppConfig?.apiRequest(endpoint, requestOptions) ||
+               Promise.reject(new Error('AppConfig not available'));
     },
 
     // 🔒 Secure redirect function to prevent open redirects
@@ -195,7 +219,7 @@ const Auth = {
         this.setButtonLoading(loginBtn, 'Signing In...');
 
         try {
-            const response = await window.AppConfig.apiRequest('/auth/login', {
+            const response = await this.authenticatedRequest('/auth/login', {
                 method: 'POST',
                 body: JSON.stringify({
                     email: email,
@@ -205,17 +229,7 @@ const Auth = {
 
             const data = await response.json();
 
-            if (response.ok && data.access_token) {
-                // 🔒 Secure token storage
-                this.setToken(data.access_token);
-
-                // Store email in sessionStorage (less sensitive than token)
-                try {
-                    sessionStorage.setItem('user_email', email);
-                } catch (error) {
-                    // Non-critical, continue anyway
-                }
-
+            if (response.ok) {
                 // 🔒 Log successful login
                 if (window.logAuthEvent) {
                     window.logAuthEvent('login_success', {
@@ -315,6 +329,7 @@ const Auth = {
         this.setButtonLoading(registerBtn, 'Creating Account...');
 
         try {
+            // Note: Registration doesn't need authentication, so we use regular apiRequest
             const response = await window.AppConfig.apiRequest('/auth/register', {
                 method: 'POST',
                 body: JSON.stringify({
@@ -409,6 +424,7 @@ const Auth = {
         this.setButtonLoading(forgotBtn, 'Sending Email...');
 
         try {
+            // Note: Forgot password doesn't need authentication
             const response = await window.AppConfig.apiRequest('/auth/forgot-password', {
                 method: 'POST',
                 body: JSON.stringify({ email })
@@ -465,6 +481,7 @@ const Auth = {
         this.setButtonLoading(forgotBtn, 'Sending Email...');
 
         try {
+            // Note: Forgot username doesn't need authentication
             const response = await window.AppConfig.apiRequest('/auth/forgot-username', {
                 method: 'POST',
                 body: JSON.stringify({ email })
@@ -497,7 +514,46 @@ const Auth = {
         }
     },
 
-    // Setup real-time validation
+    // 🔒 Secure logout functionality
+    async logout() {
+        // 🔒 Log logout attempt
+        if (window.logAuthEvent) {
+            window.logAuthEvent('logout_attempt', {
+                action: 'logout_initiated'
+            });
+        }
+
+        try {
+            await this.authenticatedRequest('/auth/logout', {
+                method: 'POST'
+            });
+        } catch (error) {
+            // Continue with logout even if request fails
+            if (window.logError) {
+                window.logError('Logout request failed', {
+                    error_type: error.name,
+                    action: 'logout_request'
+                });
+            }
+        }
+
+        this.secureRedirect('../auth/login.html');
+    },
+
+    // Check if user is authenticated
+    async isAuthenticated() {
+        try {
+            const response = await window.AppConfig.apiRequest('/auth/auth-status', {
+                method: 'GET',
+                credentials: 'same-origin'
+            });
+            return response.ok;
+        } catch (error) {
+            return false;
+        }
+    },
+
+    // Setup real-time validation (unchanged)
     setupValidation() {
         // Email validation
         const emailInputs = document.querySelectorAll('input[type="email"]');
@@ -527,7 +583,7 @@ const Auth = {
         }
     },
 
-    // 🔒 Enhanced email validation
+    // 🔒 Enhanced email validation (unchanged)
     validateEmail(input) {
         const email = input.value?.trim();
         // RFC 5322 compliant email regex (simplified but more secure)
@@ -546,7 +602,7 @@ const Auth = {
         return true;
     },
 
-    // Validate password strength
+    // Validate password strength (unchanged)
     validatePasswordStrength(password) {
         if (!password) return false;
 
@@ -559,7 +615,7 @@ const Auth = {
         return minLength && hasUpper && hasLower && hasNumber && hasSpecial;
     },
 
-    // Update password requirements display
+    // Update password requirements display (unchanged)
     updatePasswordRequirements(password) {
         const requirements = document.querySelectorAll('.password-requirements li');
         if (requirements.length === 0) return;
@@ -580,7 +636,7 @@ const Auth = {
         });
     },
 
-    // Validate password match
+    // Validate password match (unchanged)
     validatePasswordMatch(password, confirmPassword, input) {
         if (confirmPassword && password !== confirmPassword) {
             input.classList.add('error');
@@ -595,7 +651,7 @@ const Auth = {
         return true;
     },
 
-    // Show field-specific error
+    // Show field-specific error (unchanged)
     showFieldError(input, message) {
         this.hideFieldError(input);
         const error = document.createElement('span');
@@ -604,7 +660,7 @@ const Auth = {
         input.parentNode.appendChild(error);
     },
 
-    // Hide field-specific error
+    // Hide field-specific error (unchanged)
     hideFieldError(input) {
         const error = input.parentNode.querySelector('.field-error');
         if (error) {
@@ -612,7 +668,7 @@ const Auth = {
         }
     },
 
-    // 🔒 XSS-safe message display
+    // 🔒 XSS-safe message display (unchanged)
     showMessage(type, title, description = '') {
         const messageContainer = document.getElementById('message-container') ||
                                 document.getElementById('messageContainer');
@@ -655,7 +711,7 @@ const Auth = {
         }
     },
 
-    // Clear all messages
+    // Clear all messages (unchanged)
     clearMessages() {
         const messageContainer = document.getElementById('message-container') ||
                                 document.getElementById('messageContainer');
@@ -664,7 +720,7 @@ const Auth = {
         }
     },
 
-    // 🔒 Secure button loading state
+    // 🔒 Secure button loading state (unchanged)
     setButtonLoading(button, loadingText, loading = true) {
         if (!button) return;
 
@@ -686,32 +742,7 @@ const Auth = {
         }
     },
 
-    // 🔒 Secure logout functionality
-    logout() {
-        // 🔒 Log logout attempt
-        if (window.logAuthEvent) {
-            window.logAuthEvent('logout_attempt', {
-                action: 'logout_initiated'
-            });
-        }
-
-        this.removeToken();
-        this.secureRedirect('../auth/login.html');
-    },
-
-    // Check if user is authenticated
-    isAuthenticated() {
-        const token = this.getToken();
-        return !!token && token.length > 0;
-    },
-
-    // Make authenticated API request
-    async authenticatedRequest(endpoint, options = {}) {
-        return window.AppConfig?.apiRequest(endpoint, options) ||
-               Promise.reject(new Error('AppConfig not available'));
-    },
-
-    // 🔒 Setup security monitoring
+    // 🔒 Setup security monitoring (unchanged)
     setupSecurityMonitoring() {
         // Monitor for suspicious activity
         let suspiciousAttempts = 0;
@@ -733,17 +764,22 @@ const Auth = {
             lastSubmission = now;
         });
 
-        // Monitor for token manipulation
-        let lastTokenCheck = this.getToken();
-        setInterval(() => {
-            const currentToken = this.getToken();
-            if (lastTokenCheck !== currentToken && window.logSecurityEvent) {
-                window.logSecurityEvent('token_change_detected', {
-                    action: 'token_modified_outside_app'
-                });
+        // Monitor for authentication state changes
+        setInterval(async () => {
+            try {
+                const isAuth = await this.isAuthenticated();
+                if (!isAuth && window.location.pathname.includes('dashboard.html')) {
+                    if (window.logSecurityEvent) {
+                        window.logSecurityEvent('session_expired', {
+                            action: 'redirect_to_login'
+                        });
+                    }
+                    this.secureRedirect('../auth/login.html');
+                }
+            } catch (error) {
+                // Silently handle errors
             }
-            lastTokenCheck = currentToken;
-        }, 5000);
+        }, 30000); // Check every 30 seconds
     }
 };
 

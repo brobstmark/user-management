@@ -1,622 +1,637 @@
 /**
- * Secure Authentication JavaScript - Cookie-Based with CSRF Protection
- * Updated to use httpOnly cookies and CSRF tokens
+ * 🔒 Secure Authentication System
+ * Works with your existing httpOnly cookie backend
+ * NO sessionStorage - Maximum Security
  */
 
-// 🔒 Secure Auth utility object
-const Auth = {
+class Auth {
+    constructor() {
+        this.isAuthenticated = false;
+        this.userInfo = null;
+        this.authCheckInterval = null;
+        this.authEventListeners = [];
+        this.csrfToken = null;
+    }
 
-    // Current CSRF token
-    csrfToken: null,
-
-    // Initialize authentication functionality
+    /**
+     * Initialize authentication system
+     */
     async init() {
-        this.setupFormHandlers();
-        await this.initCSRF();
-        await this.checkAuthStatus();
-        this.setupSecurityMonitoring();
-
-        // 🔒 Log initialization
-        if (window.logInfo) {
-            window.logInfo('Authentication module initialized', {
-                module: 'auth',
-                csrf_enabled: !!this.csrfToken
-            });
+        // Ensure config is loaded first
+        if (!window.AppConfig?.loaded) {
+            await window.AppConfig?.init();
         }
-    },
 
-    // Initialize CSRF protection
+        // Skip auth checks on public pages
+        const currentPage = window.location.pathname;
+        const isPublicPage = currentPage.includes('login.html') ||
+                           currentPage.includes('register.html') ||
+                           currentPage.includes('forgot-password.html') ||
+                           currentPage.includes('forgot-username.html');
+
+        await this.initCSRF();
+        this.setupFormHandlers();
+
+        // Only check auth status on protected pages
+        if (!isPublicPage) {
+            await this.checkAuthStatus();
+            this.setupAuthMonitoring();
+        } else {
+            // On public pages, just check if already authenticated for smart redirects
+            const isAuth = await this._quickAuthCheck();
+            if (isAuth && (currentPage.includes('login.html') || currentPage.includes('register.html'))) {
+                this._secureRedirect('../user/dashboard.html');
+            }
+        }
+
+        this.setupValidation();
+
+        console.log('✅ Secure Authentication initialized');
+    }
+
+    /**
+     * 🔒 Initialize CSRF protection
+     */
     async initCSRF() {
         try {
-            const response = await window.AppConfig.apiRequest('/auth/csrf-token', {
+            const url = window.AppConfig?.getApiUrl('/auth/csrf-token') || '/api/v1/auth/csrf-token';
+            const response = await fetch(url, {
                 method: 'GET',
-                credentials: 'same-origin'  // Include cookies
+                credentials: 'include'  // 🔒 Include httpOnly cookies
             });
 
             if (response.ok) {
                 const data = await response.json();
                 this.csrfToken = data.csrf_token;
-
-                if (window.logInfo) {
-                    window.logInfo('CSRF token initialized', {
-                        action: 'csrf_init'
-                    });
-                }
+                console.log('✅ CSRF token initialized');
             }
         } catch (error) {
-            if (window.logError) {
-                window.logError('Failed to initialize CSRF token', {
-                    error_type: error.name,
-                    action: 'csrf_init'
-                });
-            }
+            console.warn('⚠️ Failed to initialize CSRF token:', error.name);
         }
-    },
+    }
 
-    // Set up form event handlers
+    /**
+     * 🔒 Make API request with proper cookie handling
+     */
+    async _apiRequest(endpoint, options = {}) {
+        const url = window.AppConfig?.getApiUrl(endpoint) || `/api/v1${endpoint}`;
+
+        const config = {
+            credentials: 'include',  // 🔒 CRITICAL: Include httpOnly cookies
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            },
+            ...options
+        };
+
+        // Add CSRF token for state-changing requests
+        const method = options.method?.toUpperCase();
+        if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method) && this.csrfToken) {
+            config.headers['X-CSRF-Token'] = this.csrfToken;
+        }
+
+        try {
+            const response = await fetch(url, config);
+
+            // Handle auth errors - FIXED: only redirect from protected pages
+            if (response.status === 401) {
+                this.isAuthenticated = false;
+                this.userInfo = null;
+                this._triggerAuthEvent(false);
+
+                const currentPage = window.location.pathname;
+                // Only redirect if on dashboard or other protected pages, NOT from register/login
+                if (currentPage.includes('dashboard.html') && !currentPage.includes('login.html') && !currentPage.includes('register.html')) {
+                    this._secureRedirect('../auth/login.html');
+                }
+                return null;
+            }
+
+            return response;
+        } catch (error) {
+            console.error('🚨 API request failed:', error.name);
+            throw error;
+        }
+    }
+
+    /**
+     * 🔒 Quick auth check for public pages (no redirects)
+     */
+    async _quickAuthCheck() {
+        try {
+            const url = window.AppConfig?.getApiUrl('/auth/auth-status') || '/api/v1/auth/auth-status';
+            const response = await fetch(url, {
+                method: 'GET',
+                credentials: 'include'
+            });
+            return response?.ok || false;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    /**
+     * 🔒 Check authentication status (server-side verification)
+     */
+    async checkAuthStatus() {
+        try {
+            // ✅ CORRECT ENDPOINT: /auth/auth-status (router has /auth prefix)
+            const response = await this._apiRequest('/auth/auth-status', {
+                method: 'GET'
+            });
+
+            if (response?.ok) {
+                const data = await response.json();
+                this.isAuthenticated = true;
+                this.userInfo = data.user || null;
+                this._triggerAuthEvent(true);
+                this._handlePageAccess();
+                return true;
+            } else {
+                this.isAuthenticated = false;
+                this.userInfo = null;
+                this._triggerAuthEvent(false);
+                this._handlePageAccess();
+                return false;
+            }
+        } catch (error) {
+            console.warn('⚠️ Auth status check failed:', error.name);
+            this.isAuthenticated = false;
+            this.userInfo = null;
+            this._triggerAuthEvent(false);
+            this._handlePageAccess();
+            return false;
+        }
+    }
+
+    /**
+     * 🔒 Handle login (httpOnly cookies only)
+     */
+    async login(email, password) {
+        try {
+            const response = await this._apiRequest('/auth/login', {
+                method: 'POST',
+                body: JSON.stringify({
+                    email: email.trim(),
+                    password: password
+                })
+            });
+
+            if (response?.ok) {
+                // Server sets httpOnly cookies automatically
+                await this.checkAuthStatus(); // Refresh auth state
+
+                console.log('✅ Login successful');
+                this._showMessage('success', '✅ Welcome back!', 'Redirecting to dashboard...');
+
+                setTimeout(() => {
+                    this._secureRedirect('../user/dashboard.html');
+                }, 1500);
+
+                return { success: true };
+            } else {
+                let errorMessage = 'Login failed';
+
+                switch (response?.status) {
+                    case 401:
+                        errorMessage = 'Invalid email or password';
+                        break;
+                    case 422:
+                        errorMessage = 'Please check your email and password format';
+                        break;
+                    case 429:
+                        errorMessage = 'Too many login attempts. Please try again later.';
+                        break;
+                    case 500:
+                        errorMessage = 'Server temporarily unavailable. Please try again later.';
+                        break;
+                }
+
+                this._showMessage('error', '❌ ' + errorMessage, 'Please try again or reset your password.');
+                return { success: false, error: errorMessage };
+            }
+        } catch (error) {
+            console.error('🚨 Login request failed:', error.name);
+            this._showMessage('error', '❌ Connection Error', 'Unable to connect. Please try again.');
+            return { success: false, error: 'Connection failed' };
+        }
+    }
+
+    /**
+     * 🔒 Handle registration
+     */
+    async register(userData) {
+        try {
+            const response = await this._apiRequest('/auth/register', {
+                method: 'POST',
+                body: JSON.stringify(userData)
+            });
+
+            if (response?.ok) {
+                console.log('✅ Registration successful');
+                this._showMessage('success', '✅ Account Created!',
+                    'Please check your email for verification link.');
+
+                setTimeout(() => {
+                    this._secureRedirect('login.html');
+                }, 3000);
+
+                return { success: true };
+            } else {
+                let errorMessage = 'Registration failed';
+
+                switch (response?.status) {
+                    case 409:
+                        errorMessage = 'An account with this email already exists';
+                        break;
+                    case 422:
+                        errorMessage = 'Please check your input and try again';
+                        break;
+                    case 429:
+                        errorMessage = 'Too many registration attempts. Please try again later.';
+                        break;
+                }
+
+                this._showMessage('error', '❌ Registration Failed', errorMessage);
+                return { success: false, error: errorMessage };
+            }
+        } catch (error) {
+            console.error('🚨 Registration failed:', error.name);
+            this._showMessage('error', '❌ Connection Error', 'Unable to connect. Please try again.');
+            return { success: false, error: 'Connection failed' };
+        }
+    }
+
+    /**
+     * 🔒 Handle logout (clears httpOnly cookies)
+     */
+    async logout() {
+        try {
+            await this._apiRequest('/auth/logout', {
+                method: 'POST'
+            });
+        } catch (error) {
+            console.warn('⚠️ Logout request failed:', error.name);
+        } finally {
+            // Clear local state regardless of server response
+            this.isAuthenticated = false;
+            this.userInfo = null;
+            this._triggerAuthEvent(false);
+
+            console.log('✅ Logged out');
+            this._secureRedirect('../auth/login.html');
+        }
+    }
+
+    /**
+     * 🔒 Request password reset
+     */
+    async requestPasswordReset(email) {
+        try {
+            await this._apiRequest('/auth/forgot-password', {
+                method: 'POST',
+                body: JSON.stringify({ email: email.trim() })
+            });
+
+            this._showMessage('success', '✅ Reset Email Sent',
+                'If an account exists, you will receive a password reset link.');
+
+            return { success: true };
+        } catch (error) {
+            console.error('🚨 Password reset request failed:', error.name);
+            this._showMessage('error', '❌ Connection Error', 'Unable to send email. Please try again.');
+            return { success: false, error: 'Connection failed' };
+        }
+    }
+
+    /**
+     * 🔒 Request username recovery
+     */
+    async requestUsernameRecovery(email) {
+        try {
+            await this._apiRequest('/auth/forgot-username', {
+                method: 'POST',
+                body: JSON.stringify({ email: email.trim() })
+            });
+
+            this._showMessage('success', '✅ Username Reminder Sent',
+                'If an account exists, you will receive your username.');
+
+            return { success: true };
+        } catch (error) {
+            console.error('🚨 Username recovery request failed:', error.name);
+            this._showMessage('error', '❌ Connection Error', 'Unable to send email. Please try again.');
+            return { success: false, error: 'Connection failed' };
+        }
+    }
+
+    /**
+     * 🔒 Get user information (server-verified)
+     */
+    async getUserInfo() {
+        if (!this.isAuthenticated) {
+            return null;
+        }
+
+        try {
+            const response = await this._apiRequest('/users/me', {
+                method: 'GET'
+            });
+            if (response?.ok) {
+                const userData = await response.json();
+                this.userInfo = userData;
+                return userData;
+            }
+        } catch (error) {
+            console.warn('⚠️ Failed to get user info:', error.name);
+        }
+
+        return this.userInfo;
+    }
+
+    /**
+     * Setup form handlers
+     */
     setupFormHandlers() {
         // Login form
         const loginForm = document.getElementById('loginForm');
         if (loginForm) {
-            loginForm.addEventListener('submit', this.handleLogin.bind(this));
+            loginForm.addEventListener('submit', this._handleLoginForm.bind(this));
         }
 
         // Register form
         const registerForm = document.getElementById('registerForm');
         if (registerForm) {
-            registerForm.addEventListener('submit', this.handleRegister.bind(this));
+            registerForm.addEventListener('submit', this._handleRegisterForm.bind(this));
         }
 
         // Forgot password form
         const forgotPasswordForm = document.getElementById('forgotPasswordForm');
         if (forgotPasswordForm) {
-            forgotPasswordForm.addEventListener('submit', this.handleForgotPassword.bind(this));
+            forgotPasswordForm.addEventListener('submit', this._handleForgotPasswordForm.bind(this));
         }
 
         // Forgot username form
         const forgotUsernameForm = document.getElementById('forgotUsernameForm');
         if (forgotUsernameForm) {
-            forgotUsernameForm.addEventListener('submit', this.handleForgotUsername.bind(this));
+            forgotUsernameForm.addEventListener('submit', this._handleForgotUsernameForm.bind(this));
         }
 
-        // Add real-time validation
-        this.setupValidation();
-    },
-
-    // 🔒 Check authentication status using backend endpoint
-    async checkAuthStatus() {
-        const currentPage = window.location.pathname;
-
-        try {
-            const response = await window.AppConfig.apiRequest('/auth/auth-status', {
-                method: 'GET',
-                credentials: 'same-origin'  // Include httpOnly cookies
-            });
-
-            const isAuthenticated = response.ok;
-
-            // 🔒 Log authentication check
-            if (window.logInfo) {
-                window.logInfo('Authentication status checked', {
-                    authenticated: isAuthenticated,
-                    page: currentPage.split('/').pop()
-                });
+        // Logout buttons
+        document.addEventListener('click', (e) => {
+            if (e.target.matches('[data-action="logout"]')) {
+                e.preventDefault();
+                this.logout();
             }
+        });
+    }
 
-            // If on login/register page and already authenticated, redirect to dashboard
-            if (isAuthenticated && (currentPage.includes('login.html') || currentPage.includes('register.html'))) {
-                this.secureRedirect('../user/dashboard.html');
-            }
-
-            // If on protected page and not authenticated, redirect to login
-            if (!isAuthenticated && currentPage.includes('dashboard.html')) {
-                this.secureRedirect('../auth/login.html');
-            }
-
-            return isAuthenticated;
-
-        } catch (error) {
-            // Not authenticated or connection error
-            if (window.logInfo) {
-                window.logInfo('Authentication check failed', {
-                    error_type: error.name,
-                    page: currentPage.split('/').pop()
-                });
-            }
-
-            // If on protected page, redirect to login
-            if (currentPage.includes('dashboard.html')) {
-                this.secureRedirect('../auth/login.html');
-            }
-
-            return false;
-        }
-    },
-
-    // 🔒 Create authenticated request with CSRF token
-    async authenticatedRequest(endpoint, options = {}) {
-        const requestOptions = {
-            ...options,
-            credentials: 'same-origin',  // Include httpOnly cookies
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers
-            }
-        };
-
-        // Add CSRF token for state-changing requests
-        if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(options.method?.toUpperCase())) {
-            if (this.csrfToken) {
-                requestOptions.headers['X-CSRF-Token'] = this.csrfToken;
-            } else {
-                // Try to get CSRF token if we don't have one
-                await this.initCSRF();
-                if (this.csrfToken) {
-                    requestOptions.headers['X-CSRF-Token'] = this.csrfToken;
-                }
-            }
-        }
-
-        return window.AppConfig?.apiRequest(endpoint, requestOptions) ||
-               Promise.reject(new Error('AppConfig not available'));
-    },
-
-    // 🔒 Secure redirect function to prevent open redirects
-    secureRedirect(path) {
-        // Validate that path is relative and doesn't contain dangerous patterns
-        if (typeof path !== 'string' ||
-            path.startsWith('http://') ||
-            path.startsWith('https://') ||
-            path.startsWith('//') ||
-            path.includes('javascript:') ||
-            path.includes('data:')) {
-
-            if (window.logSecurityEvent) {
-                window.logSecurityEvent('blocked_dangerous_redirect', {
-                    attempted_path: path,
-                    reason: 'potential_open_redirect'
-                });
-            }
-            return;
-        }
-
-        // 🔒 Log secure redirect
-        if (window.logInfo) {
-            window.logInfo('Performing secure redirect', {
-                destination: path
-            });
-        }
-
-        window.location.href = path;
-    },
-
-    // Handle login form submission
-    async handleLogin(e) {
+    /**
+     * 🔒 Handle login form submission
+     */
+    async _handleLoginForm(e) {
         e.preventDefault();
 
         const email = document.getElementById('email')?.value?.trim();
         const password = document.getElementById('password')?.value;
         const loginBtn = document.getElementById('loginBtn');
 
-        // 🔒 Input validation
         if (!email || !password) {
-            this.showMessage('error', '⚠️ Missing Information', 'Please enter both email and password.');
+            this._showMessage('error', '⚠️ Missing Information', 'Please enter both email and password.');
             return;
         }
 
-        // 🔒 Log login attempt (email will be redacted)
-        if (window.logAuthEvent) {
-            window.logAuthEvent('login_attempt', {
-                action: 'login_form_submit',
-                email: email // Will be redacted by logger
-            });
-        }
-
-        // Clear previous messages
-        this.clearMessages();
-
-        // Disable button and show loading
-        this.setButtonLoading(loginBtn, 'Signing In...');
+        this._clearMessages();
+        this._setButtonLoading(loginBtn, 'Signing In...');
 
         try {
-            const response = await this.authenticatedRequest('/auth/login', {
-                method: 'POST',
-                body: JSON.stringify({
-                    email: email,
-                    password: password
-                })
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                // 🔒 Log successful login
-                if (window.logAuthEvent) {
-                    window.logAuthEvent('login_success', {
-                        action: 'login_successful',
-                        email: email // Will be redacted
-                    });
-                }
-
-                this.showMessage('success', '✅ Welcome back!', 'Redirecting to your dashboard...');
-
-                setTimeout(() => {
-                    this.secureRedirect('../user/dashboard.html');
-                }, 1500);
-
-            } else {
-                // 🔒 Secure error handling - don't expose server details
-                let errorMessage = 'Login failed';
-
-                if (response.status === 401) {
-                    errorMessage = 'Invalid email or password';
-                } else if (response.status === 422) {
-                    errorMessage = 'Please check your email and password format';
-                } else if (response.status === 429) {
-                    errorMessage = 'Too many login attempts. Please try again later.';
-                } else if (response.status >= 500) {
-                    errorMessage = 'Server temporarily unavailable. Please try again later.';
-                }
-
-                // 🔒 Log failed login attempt
-                if (window.logSecurityEvent) {
-                    window.logSecurityEvent('login_failure', {
-                        action: 'login_failed',
-                        status_code: response.status,
-                        email: email // Will be redacted
-                    });
-                }
-
-                this.showMessage('error', `❌ ${errorMessage}`, 'Please try again or reset your password if needed.');
-            }
-        } catch (error) {
-            // 🔒 Log connection error
-            if (window.logError) {
-                window.logError('Login connection error', {
-                    error_type: error.name,
-                    action: 'login_request'
-                });
-            }
-
-            this.showMessage('error', '❌ Connection Error', 'Unable to connect to the server. Please check your internet connection and try again.');
+            await this.login(email, password);
         } finally {
-            this.setButtonLoading(loginBtn, 'Sign In', false);
+            this._setButtonLoading(loginBtn, 'Sign In', false);
         }
-    },
+    }
 
-    // Handle registration form submission
-    async handleRegister(e) {
+    /**
+     * 🔒 Handle registration form submission
+     */
+    async _handleRegisterForm(e) {
         e.preventDefault();
 
         const formData = new FormData(e.target);
         const data = Object.fromEntries(formData);
         const registerBtn = document.getElementById('registerBtn');
 
-        // 🔒 Input sanitization and validation
-        const email = data.email?.trim();
-        const password = data.password;
-        const confirmPassword = data.confirmPassword;
-        const firstName = data.firstName?.trim();
-        const lastName = data.lastName?.trim();
-
-        // Validate required fields
-        if (!email || !password) {
-            this.showMessage('error', '❌ Missing Information', 'Email and password are required.');
+        // Validation
+        if (!data.email?.trim() || !data.password) {
+            this._showMessage('error', '❌ Missing Information', 'Email and password are required.');
             return;
         }
 
-        // Validate passwords match
-        if (password !== confirmPassword) {
-            this.showMessage('error', '❌ Passwords Don\'t Match', 'Please make sure both password fields are identical.');
+        if (data.password !== data.confirmPassword) {
+            this._showMessage('error', '❌ Passwords Don\'t Match', 'Please ensure both password fields are identical.');
             return;
         }
 
-        // Validate password strength
-        if (!this.validatePasswordStrength(password)) {
-            this.showMessage('error', '❌ Password Too Weak', 'Please ensure your password meets all the requirements.');
+        if (!this._validatePasswordStrength(data.password)) {
+            this._showMessage('error', '❌ Password Too Weak', 'Please ensure your password meets all requirements.');
             return;
         }
 
-        // 🔒 Log registration attempt
-        if (window.logAuthEvent) {
-            window.logAuthEvent('registration_attempt', {
-                action: 'register_form_submit',
-                email: email // Will be redacted
-            });
-        }
-
-        this.clearMessages();
-        this.setButtonLoading(registerBtn, 'Creating Account...');
+        this._clearMessages();
+        this._setButtonLoading(registerBtn, 'Creating Account...');
 
         try {
-            // Note: Registration doesn't need authentication, so we use regular apiRequest
-            const response = await window.AppConfig.apiRequest('/auth/register', {
-                method: 'POST',
-                body: JSON.stringify({
-                    email: email,
-                    password: password,
-                    first_name: firstName || null,
-                    last_name: lastName || null
-                })
+            const result = await this.register({
+                email: data.email.trim(),
+                password: data.password,
+                first_name: data.firstName?.trim() || null,
+                last_name: data.lastName?.trim() || null
             });
 
-            const result = await response.json();
-
-            if (response.ok) {
-                // 🔒 Log successful registration
-                if (window.logAuthEvent) {
-                    window.logAuthEvent('registration_success', {
-                        action: 'registration_successful',
-                        email: email // Will be redacted
-                    });
-                }
-
-                this.showMessage('success', '✅ Account Created Successfully!',
-                    'Please check your email for a verification link before logging in.');
-
-                // Clear form
+            if (result.success) {
                 e.target.reset();
-
-                // Redirect to login after delay
-                setTimeout(() => {
-                    this.secureRedirect('login.html');
-                }, 3000);
-
-            } else {
-                // 🔒 Secure error handling
-                let errorMessage = 'Registration failed';
-
-                if (response.status === 422) {
-                    errorMessage = 'Please check your input and try again';
-                } else if (response.status === 409) {
-                    errorMessage = 'An account with this email already exists';
-                } else if (response.status === 429) {
-                    errorMessage = 'Too many registration attempts. Please try again later.';
-                }
-
-                // 🔒 Log failed registration
-                if (window.logSecurityEvent) {
-                    window.logSecurityEvent('registration_failure', {
-                        action: 'registration_failed',
-                        status_code: response.status,
-                        email: email // Will be redacted
-                    });
-                }
-
-                this.showMessage('error', '❌ Registration Failed', errorMessage);
             }
-        } catch (error) {
-            // 🔒 Log connection error
-            if (window.logError) {
-                window.logError('Registration connection error', {
-                    error_type: error.name,
-                    action: 'registration_request'
-                });
-            }
-
-            this.showMessage('error', '❌ Connection Error', 'Unable to connect to the server. Please try again.');
         } finally {
-            this.setButtonLoading(registerBtn, 'Create Account', false);
+            this._setButtonLoading(registerBtn, 'Create Account', false);
         }
-    },
+    }
 
-    // Handle forgot password form submission
-    async handleForgotPassword(e) {
+    /**
+     * Handle forgot password form
+     */
+    async _handleForgotPasswordForm(e) {
         e.preventDefault();
 
         const email = document.getElementById('email')?.value?.trim();
         const forgotBtn = document.getElementById('forgotBtn');
 
         if (!email) {
-            this.showMessage('error', '❌ Email Required', 'Please enter your email address.');
+            this._showMessage('error', '❌ Email Required', 'Please enter your email address.');
             return;
         }
 
-        // 🔒 Log forgot password attempt
-        if (window.logAuthEvent) {
-            window.logAuthEvent('forgot_password_attempt', {
-                action: 'forgot_password_submit',
-                email: email // Will be redacted
-            });
-        }
-
-        this.clearMessages();
-        this.setButtonLoading(forgotBtn, 'Sending Email...');
+        this._clearMessages();
+        this._setButtonLoading(forgotBtn, 'Sending Email...');
 
         try {
-            // Note: Forgot password doesn't need authentication
-            const response = await window.AppConfig.apiRequest('/auth/forgot-password', {
-                method: 'POST',
-                body: JSON.stringify({ email })
-            });
-
-            // Always show success message for security (prevent email enumeration)
-            this.showMessage('success', '✅ Reset Email Sent',
-                'If an account with this email exists, you will receive a password reset link shortly.');
-
-            // 🔒 Log forgot password request (always log as success to prevent enumeration)
-            if (window.logAuthEvent) {
-                window.logAuthEvent('forgot_password_requested', {
-                    action: 'forgot_password_sent',
-                    email: email // Will be redacted
-                });
-            }
-
-        } catch (error) {
-            // 🔒 Log connection error
-            if (window.logError) {
-                window.logError('Forgot password connection error', {
-                    error_type: error.name,
-                    action: 'forgot_password_request'
-                });
-            }
-
-            this.showMessage('error', '❌ Connection Error', 'Unable to send email. Please try again.');
+            await this.requestPasswordReset(email);
         } finally {
-            this.setButtonLoading(forgotBtn, 'Send Reset Email', false);
+            this._setButtonLoading(forgotBtn, 'Send Reset Email', false);
         }
-    },
+    }
 
-    // Handle forgot username form submission
-    async handleForgotUsername(e) {
+    /**
+     * Handle forgot username form
+     */
+    async _handleForgotUsernameForm(e) {
         e.preventDefault();
 
         const email = document.getElementById('email')?.value?.trim();
         const forgotBtn = document.getElementById('forgotBtn');
 
         if (!email) {
-            this.showMessage('error', '❌ Email Required', 'Please enter your email address.');
+            this._showMessage('error', '❌ Email Required', 'Please enter your email address.');
             return;
         }
 
-        // 🔒 Log forgot username attempt
-        if (window.logAuthEvent) {
-            window.logAuthEvent('forgot_username_attempt', {
-                action: 'forgot_username_submit',
-                email: email // Will be redacted
-            });
-        }
-
-        this.clearMessages();
-        this.setButtonLoading(forgotBtn, 'Sending Email...');
+        this._clearMessages();
+        this._setButtonLoading(forgotBtn, 'Sending Email...');
 
         try {
-            // Note: Forgot username doesn't need authentication
-            const response = await window.AppConfig.apiRequest('/auth/forgot-username', {
-                method: 'POST',
-                body: JSON.stringify({ email })
-            });
-
-            // Always show success message for security
-            this.showMessage('success', '✅ Username Reminder Sent',
-                'If an account with this email exists, you will receive your username shortly.');
-
-            // 🔒 Log forgot username request
-            if (window.logAuthEvent) {
-                window.logAuthEvent('forgot_username_requested', {
-                    action: 'forgot_username_sent',
-                    email: email // Will be redacted
-                });
-            }
-
-        } catch (error) {
-            // 🔒 Log connection error
-            if (window.logError) {
-                window.logError('Forgot username connection error', {
-                    error_type: error.name,
-                    action: 'forgot_username_request'
-                });
-            }
-
-            this.showMessage('error', '❌ Connection Error', 'Unable to send email. Please try again.');
+            await this.requestUsernameRecovery(email);
         } finally {
-            this.setButtonLoading(forgotBtn, 'Send Username', false);
+            this._setButtonLoading(forgotBtn, 'Send Username', false);
         }
-    },
+    }
 
-    // 🔒 Secure logout functionality
-    async logout() {
-        // 🔒 Log logout attempt
-        if (window.logAuthEvent) {
-            window.logAuthEvent('logout_attempt', {
-                action: 'logout_initiated'
-            });
-        }
+    /**
+     * Setup authentication monitoring
+     */
+    setupAuthMonitoring() {
+        // Check auth status periodically
+        this.authCheckInterval = setInterval(async () => {
+            const wasAuthenticated = this.isAuthenticated;
+            const isNowAuthenticated = await this.checkAuthStatus();
 
-        try {
-            await this.authenticatedRequest('/auth/logout', {
-                method: 'POST'
-            });
-        } catch (error) {
-            // Continue with logout even if request fails
-            if (window.logError) {
-                window.logError('Logout request failed', {
-                    error_type: error.name,
-                    action: 'logout_request'
-                });
+            // Handle auth state changes
+            if (wasAuthenticated && !isNowAuthenticated) {
+                console.warn('🔐 Session expired');
             }
+        }, 30000); // Check every 30 seconds
+    }
+
+    /**
+     * Handle page access control
+     */
+    _handlePageAccess() {
+        const currentPage = window.location.pathname;
+
+        // Only handle redirects for specific scenarios
+        if (this.isAuthenticated) {
+            // If logged in and on auth pages, redirect to dashboard
+            if (currentPage.includes('login.html') || currentPage.includes('register.html')) {
+                this._secureRedirect('../user/dashboard.html');
+            }
+        } else {
+            // If NOT logged in and on protected pages, redirect to login
+            if (currentPage.includes('dashboard.html')) {
+                this._secureRedirect('../auth/login.html');
+            }
+            // For register.html and login.html when not logged in: DO NOTHING (stay on page)
         }
+    }
 
-        this.secureRedirect('../auth/login.html');
-    },
-
-    // Check if user is authenticated
-    async isAuthenticated() {
-        try {
-            const response = await window.AppConfig.apiRequest('/auth/auth-status', {
-                method: 'GET',
-                credentials: 'same-origin'
-            });
-            return response.ok;
-        } catch (error) {
-            return false;
-        }
-    },
-
-    // Setup real-time validation (unchanged)
+    /**
+     * Setup form validation
+     */
     setupValidation() {
         // Email validation
-        const emailInputs = document.querySelectorAll('input[type="email"]');
-        emailInputs.forEach(input => {
-            input.addEventListener('blur', (e) => {
-                this.validateEmail(e.target);
-            });
-        });
+        document.addEventListener('blur', (e) => {
+            if (e.target.type === 'email') {
+                this._validateEmail(e.target);
+            }
+        }, true);
 
         // Password validation
-        const passwordInputs = document.querySelectorAll('input[type="password"]');
-        passwordInputs.forEach(input => {
-            if (input.id === 'password') {
-                input.addEventListener('input', (e) => {
-                    this.updatePasswordRequirements(e.target.value);
-                });
+        document.addEventListener('input', (e) => {
+            if (e.target.id === 'password') {
+                this._updatePasswordRequirements(e.target.value);
+            }
+            if (e.target.id === 'confirmPassword') {
+                const password = document.getElementById('password')?.value || '';
+                this._validatePasswordMatch(password, e.target.value, e.target);
             }
         });
+    }
 
-        // Confirm password validation
-        const confirmPasswordInput = document.getElementById('confirmPassword');
-        if (confirmPasswordInput) {
-            confirmPasswordInput.addEventListener('input', (e) => {
-                const password = document.getElementById('password')?.value || '';
-                this.validatePasswordMatch(password, e.target.value, e.target);
-            });
-        }
-    },
+    /**
+     * Add authentication event listener
+     */
+    onAuthStateChange(callback) {
+        this.authEventListeners.push(callback);
+    }
 
-    // 🔒 Enhanced email validation (unchanged)
-    validateEmail(input) {
+    /**
+     * Trigger authentication events
+     */
+    _triggerAuthEvent(authenticated) {
+        const event = new CustomEvent('authStateChange', {
+            detail: { authenticated, userInfo: this.userInfo }
+        });
+        window.dispatchEvent(event);
+
+        // Call registered listeners
+        this.authEventListeners.forEach(callback => {
+            try {
+                callback(authenticated, this.userInfo);
+            } catch (error) {
+                console.error('🚨 Auth event listener error:', error);
+            }
+        });
+    }
+
+    /**
+     * 🔒 Validate email format
+     */
+    _validateEmail(input) {
         const email = input.value?.trim();
-        // RFC 5322 compliant email regex (simplified but more secure)
         const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 
         if (email && (!emailRegex.test(email) || email.length > 254)) {
             input.classList.add('error');
-            this.showFieldError(input, 'Please enter a valid email address');
+            this._showFieldError(input, 'Please enter a valid email address');
             return false;
         } else if (email) {
             input.classList.remove('error');
             input.classList.add('success');
-            this.hideFieldError(input);
+            this._hideFieldError(input);
             return true;
         }
         return true;
-    },
+    }
 
-    // Validate password strength (unchanged)
-    validatePasswordStrength(password) {
+    /**
+     * Validate password strength
+     */
+    _validatePasswordStrength(password) {
         if (!password) return false;
 
-        const minLength = password.length >= 8 && password.length <= 128;
-        const hasUpper = /[A-Z]/.test(password);
-        const hasLower = /[a-z]/.test(password);
-        const hasNumber = /\d/.test(password);
-        const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\?]/.test(password);
+        const checks = [
+            password.length >= 8 && password.length <= 128,
+            /[A-Z]/.test(password),
+            /[a-z]/.test(password),
+            /\d/.test(password),
+            /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\?]/.test(password)
+        ];
 
-        return minLength && hasUpper && hasLower && hasNumber && hasSpecial;
-    },
+        return checks.every(check => check);
+    }
 
-    // Update password requirements display (unchanged)
-    updatePasswordRequirements(password) {
+    /**
+     * Update password requirements display
+     */
+    _updatePasswordRequirements(password) {
         const requirements = document.querySelectorAll('.password-requirements li');
         if (requirements.length === 0) return;
 
@@ -628,80 +643,78 @@ const Auth = {
         ];
 
         requirements.forEach((req, index) => {
-            if (checks[index]) {
-                req.classList.add('valid');
-            } else {
-                req.classList.remove('valid');
-            }
+            req.classList.toggle('valid', checks[index]);
         });
-    },
+    }
 
-    // Validate password match (unchanged)
-    validatePasswordMatch(password, confirmPassword, input) {
+    /**
+     * Validate password match
+     */
+    _validatePasswordMatch(password, confirmPassword, input) {
         if (confirmPassword && password !== confirmPassword) {
             input.classList.add('error');
-            this.showFieldError(input, 'Passwords do not match');
+            this._showFieldError(input, 'Passwords do not match');
             return false;
         } else if (confirmPassword) {
             input.classList.remove('error');
             input.classList.add('success');
-            this.hideFieldError(input);
+            this._hideFieldError(input);
             return true;
         }
         return true;
-    },
+    }
 
-    // Show field-specific error (unchanged)
-    showFieldError(input, message) {
-        this.hideFieldError(input);
+    /**
+     * Show field error
+     */
+    _showFieldError(input, message) {
+        this._hideFieldError(input);
         const error = document.createElement('span');
         error.className = 'field-error';
-        error.textContent = message; // 🔒 Use textContent to prevent XSS
+        error.textContent = String(message).substring(0, 100);
         input.parentNode.appendChild(error);
-    },
+    }
 
-    // Hide field-specific error (unchanged)
-    hideFieldError(input) {
+    /**
+     * Hide field error
+     */
+    _hideFieldError(input) {
         const error = input.parentNode.querySelector('.field-error');
-        if (error) {
-            error.remove();
-        }
-    },
+        if (error) error.remove();
+    }
 
-    // 🔒 XSS-safe message display (unchanged)
-    showMessage(type, title, description = '') {
+    /**
+     * 🔒 Show secure message
+     */
+    _showMessage(type, title, description = '') {
         const messageContainer = document.getElementById('message-container') ||
                                 document.getElementById('messageContainer');
+
         if (!messageContainer) {
-            // Use global message function if available
             if (window.displayMessage) {
                 window.displayMessage(`${title}. ${description}`, type);
             }
             return;
         }
 
-        // Clear previous messages
         messageContainer.innerHTML = '';
 
-        // 🔒 Create elements safely to prevent XSS
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${type}`;
 
         const titleElement = document.createElement('strong');
-        titleElement.textContent = String(title).substring(0, 100); // Limit length
-
+        titleElement.textContent = String(title).substring(0, 100);
         messageDiv.appendChild(titleElement);
 
         if (description) {
             messageDiv.appendChild(document.createElement('br'));
             const descElement = document.createElement('span');
-            descElement.textContent = String(description).substring(0, 300); // Limit length
+            descElement.textContent = String(description).substring(0, 300);
             messageDiv.appendChild(descElement);
         }
 
         messageContainer.appendChild(messageDiv);
 
-        // Auto-remove success messages
         if (type === 'success') {
             setTimeout(() => {
                 if (messageDiv.parentNode) {
@@ -709,30 +722,31 @@ const Auth = {
                 }
             }, 5000);
         }
-    },
+    }
 
-    // Clear all messages (unchanged)
-    clearMessages() {
+    /**
+     * Clear all messages
+     */
+    _clearMessages() {
         const messageContainer = document.getElementById('message-container') ||
                                 document.getElementById('messageContainer');
         if (messageContainer) {
             messageContainer.innerHTML = '';
         }
-    },
+    }
 
-    // 🔒 Secure button loading state (unchanged)
-    setButtonLoading(button, loadingText, loading = true) {
+    /**
+     * Set button loading state
+     */
+    _setButtonLoading(button, loadingText, loading = true) {
         if (!button) return;
 
         if (loading) {
             button.disabled = true;
-            // 🔒 Create spinner safely
             const spinner = document.createElement('span');
             spinner.className = 'loading-spinner';
-
             const text = document.createElement('span');
-            text.textContent = String(loadingText).substring(0, 50); // Limit length
-
+            text.textContent = String(loadingText).substring(0, 50);
             button.innerHTML = '';
             button.appendChild(spinner);
             button.appendChild(text);
@@ -740,65 +754,54 @@ const Auth = {
             button.disabled = false;
             button.textContent = String(loadingText).substring(0, 50);
         }
-    },
-
-    // 🔒 Setup security monitoring (unchanged)
-    setupSecurityMonitoring() {
-        // Monitor for suspicious activity
-        let suspiciousAttempts = 0;
-        const maxAttempts = 5;
-
-        // Monitor rapid form submissions
-        let lastSubmission = 0;
-        document.addEventListener('submit', (e) => {
-            const now = Date.now();
-            if (now - lastSubmission < 1000) { // Less than 1 second
-                suspiciousAttempts++;
-                if (suspiciousAttempts > maxAttempts && window.logSecurityEvent) {
-                    window.logSecurityEvent('rapid_form_submissions_detected', {
-                        attempts: suspiciousAttempts,
-                        time_window: '1_second'
-                    });
-                }
-            }
-            lastSubmission = now;
-        });
-
-        // Monitor for authentication state changes
-        setInterval(async () => {
-            try {
-                const isAuth = await this.isAuthenticated();
-                if (!isAuth && window.location.pathname.includes('dashboard.html')) {
-                    if (window.logSecurityEvent) {
-                        window.logSecurityEvent('session_expired', {
-                            action: 'redirect_to_login'
-                        });
-                    }
-                    this.secureRedirect('../auth/login.html');
-                }
-            } catch (error) {
-                // Silently handle errors
-            }
-        }, 30000); // Check every 30 seconds
     }
-};
 
-// Initialize authentication when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-    Auth.init();
-});
+    /**
+     * 🔒 Secure redirect
+     */
+    _secureRedirect(path) {
+        if (typeof path !== 'string' ||
+            path.startsWith('http://') ||
+            path.startsWith('https://') ||
+            path.startsWith('//') ||
+            path.includes('javascript:') ||
+            path.includes('data:')) {
+            console.error('🚨 Blocked dangerous redirect:', path);
+            return;
+        }
 
-// 🔒 Expose Auth globally with protection
-try {
-    Object.defineProperty(window, 'Auth', {
-        value: Auth,
-        writable: false,
-        configurable: false
-    });
-} catch (e) {
-    // Fallback if defineProperty fails
-    window.Auth = Auth;
+        window.location.href = path;
+    }
+
+    /**
+     * Cleanup
+     */
+    destroy() {
+        if (this.authCheckInterval) {
+            clearInterval(this.authCheckInterval);
+        }
+        this.authEventListeners = [];
+    }
 }
 
-// 🔒 Global function for backward compatibility
-window.handleLogin = Auth.handleLogin.bind(Auth);
+// 🔒 Create and expose global instance
+(function() {
+    'use strict';
+
+    const authInstance = new Auth();
+
+    try {
+        Object.defineProperty(window, 'Auth', {
+            value: authInstance,
+            writable: false,
+            configurable: false
+        });
+    } catch (error) {
+        window.Auth = authInstance;
+    }
+})();
+
+// Initialize when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    window.Auth?.init();
+});

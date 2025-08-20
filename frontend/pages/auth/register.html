@@ -4,7 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Register - User Management System</title>
+
+    <!-- 🛡️ ENTERPRISE SECURITY HEADERS -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self';">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+    <meta http-equiv="x-dns-prefetch-control" content="off">
+    <meta http-equiv="Permissions-Policy" content="geolocation=(), microphone=(), camera=()">
+
+    <!-- 🎨 EXTERNAL STYLES -->
     <link rel="stylesheet" href="../../assets/css/auth.css">
+    <link rel="stylesheet" href="../../assets/css/main.css">
 </head>
 <body>
     <div class="auth-container">
@@ -13,32 +23,88 @@
             <p>Join our platform and get started</p>
         </div>
 
+        <!-- 🔒 SECURE MESSAGE CONTAINER -->
         <div id="message-container"></div>
+        <div id="messageContainer"></div>
 
-        <form id="registerForm">
+        <form id="registerForm" novalidate>
             <div class="form-group">
                 <label for="email">Email Address: *</label>
-                <input type="email" id="email" name="email" required autocomplete="email">
+                <input
+                    type="email"
+                    id="email"
+                    name="email"
+                    required
+                    autocomplete="email"
+                    maxlength="254"
+                    pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                    title="Please enter a valid email address"
+                    data-validate="email"
+                >
+                <div class="validation-message" id="emailValidation"></div>
             </div>
 
             <div class="form-group">
                 <label for="firstName">First Name:</label>
-                <input type="text" id="firstName" name="firstName" maxlength="100" autocomplete="given-name">
+                <input
+                    type="text"
+                    id="firstName"
+                    name="firstName"
+                    maxlength="100"
+                    autocomplete="given-name"
+                    pattern="[a-zA-Z\s\-']+"
+                    title="Only letters, spaces, hyphens, and apostrophes allowed"
+                >
+                <div class="validation-message" id="firstNameValidation"></div>
             </div>
 
             <div class="form-group">
                 <label for="lastName">Last Name:</label>
-                <input type="text" id="lastName" name="lastName" maxlength="100" autocomplete="family-name">
+                <input
+                    type="text"
+                    id="lastName"
+                    name="lastName"
+                    maxlength="100"
+                    autocomplete="family-name"
+                    pattern="[a-zA-Z\s\-']+"
+                    title="Only letters, spaces, hyphens, and apostrophes allowed"
+                >
+                <div class="validation-message" id="lastNameValidation"></div>
             </div>
 
             <div class="form-group">
                 <label for="username">Username (optional):</label>
-                <input type="text" id="username" name="username" minlength="3" maxlength="50" autocomplete="username" placeholder="Letters, numbers, underscore, hyphen only">
+                <input
+                    type="text"
+                    id="username"
+                    name="username"
+                    minlength="3"
+                    maxlength="50"
+                    autocomplete="username"
+                    placeholder="Letters, numbers, underscore, hyphen only"
+                    pattern="[a-zA-Z0-9_-]+"
+                    title="Only letters, numbers, underscores, and hyphens allowed"
+                >
+                <div class="validation-message" id="usernameValidation"></div>
             </div>
 
             <div class="form-group">
                 <label for="password">Password: *</label>
-                <input type="password" id="password" name="password" required minlength="8" maxlength="100" autocomplete="new-password">
+                <input
+                    type="password"
+                    id="password"
+                    name="password"
+                    required
+                    minlength="8"
+                    maxlength="128"
+                    autocomplete="new-password"
+                    title="Password must meet all requirements below"
+                    data-validate="password"
+                >
+                <button type="button" class="password-toggle" id="passwordToggle" tabindex="-1">
+                    👁️
+                </button>
+                <div class="validation-message" id="passwordValidation"></div>
 
                 <div class="password-requirements">
                     <h4>Password Requirements:</h4>
@@ -53,18 +119,32 @@
 
             <div class="form-group">
                 <label for="confirmPassword">Confirm Password: *</label>
-                <input type="password" id="confirmPassword" name="confirmPassword" required autocomplete="new-password">
+                <input
+                    type="password"
+                    id="confirmPassword"
+                    name="confirmPassword"
+                    required
+                    autocomplete="new-password"
+                    title="Must match the password above"
+                    data-validate="confirm-password"
+                >
+                <button type="button" class="password-toggle" id="confirmPasswordToggle" tabindex="-1">
+                    👁️
+                </button>
+                <div class="validation-message" id="confirmPasswordValidation"></div>
             </div>
 
             <div class="checkbox-group">
                 <input type="checkbox" id="termsAgreement" name="termsAgreement" required>
                 <label for="termsAgreement">
-                    I agree to the <a href="#" target="_blank">Terms of Service</a> and <a href="#" target="_blank">Privacy Policy</a>
+                    I agree to the <a href="#" target="_blank" rel="noopener noreferrer">Terms of Service</a> and <a href="#" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
                 </label>
+                <div class="validation-message" id="termsValidation"></div>
             </div>
 
             <button type="submit" class="auth-btn" id="registerBtn">
-                Create Account
+                <span class="loading-spinner" id="loadingSpinner" style="display: none;"></span>
+                <span id="buttonText">Create Account</span>
             </button>
         </form>
 
@@ -86,9 +166,11 @@
         </p>
     </div>
 
+    <!-- 🔒 SECURE SCRIPTS IN PROPER ORDER -->
     <script src="../../assets/js/config.js"></script>
+    <script src="../../assets/js/logger.js"></script>
     <script src="../../assets/js/main.js"></script>
-
     <script src="../../assets/js/auth.js"></script>
+    <script src="../../assets/js/register.js"></script>
 </body>
 </html>

@@ -61,7 +61,7 @@ class SecureFrontendLogger {
                 // Email pattern
                 .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, '[EMAIL_REDACTED]')
                 // Token patterns
-                .replace(/\b[A-Za-z0-9+/]{20,}={0,2}\b/g, '[TOKEN_REDACTED]')
+                .replace(/\b[A-Za-z0-9+/]{40,}={0,2}\b/g, '[TOKEN_REDACTED]')
                 .replace(/\b[A-Fa-f0-9]{32,}\b/g, '[TOKEN_REDACTED]')
                 .replace(/\bBearereyJ[A-Za-z0-9+/=]+\b/g, '[TOKEN_REDACTED]')
                 .replace(/\btoken[=:]\s*[A-Za-z0-9+/=]+/gi, 'token=[TOKEN_REDACTED]')
@@ -409,44 +409,78 @@ class SecureFrontendLogger {
     }
 }
 
-// 🔒 Initialize global logger with environment detection
-const isProduction = window.location.hostname !== 'localhost' &&
-                    !window.location.hostname.includes('127.0.0.1') &&
-                    !window.location.hostname.includes('dev') &&
-                    !window.location.hostname.includes('staging');
+// 🔒 Initialize logger after config loads
+async function initializeFrontendLogger() {
+    try {
+        // Wait for config to be available
+        await window.AppConfig?.init();
 
-window.FrontendLogger = new SecureFrontendLogger({
-    enableConsoleLogging: !isProduction,
-    enabledInProduction: false,
-    maxLogLevel: isProduction ? 'WARN' : 'DEBUG'
+        const environment = window.AppConfig?.getEnvironment() || 'production';
+        const isProduction = environment === 'production';
+        const isDebug = window.AppConfig?.isDebug() || false;
+
+        window.FrontendLogger = new SecureFrontendLogger({
+            enableConsoleLogging: !isProduction || isDebug,
+            enabledInProduction: false,
+            maxLogLevel: isProduction ? 'WARN' : 'DEBUG'
+        });
+
+        if (!isProduction || isDebug) {
+            console.log(`Frontend logger initialized for ${environment} environment`);
+        }
+
+    } catch (error) {
+        // Fallback to safe defaults if config fails
+        console.warn('Config unavailable, using fallback logger settings');
+        window.FrontendLogger = new SecureFrontendLogger({
+            enableConsoleLogging: false,
+            enabledInProduction: false,
+            maxLogLevel: 'ERROR'
+        });
+    }
+}
+
+// Initialize the logger
+initializeFrontendLogger();
+
+// 🔒 Expose convenience functions after logger is ready
+document.addEventListener('DOMContentLoaded', async () => {
+    // Ensure logger is initialized before exposing functions
+    if (!window.FrontendLogger) {
+        await initializeFrontendLogger();
+    }
+
+    window.logDebug = window.FrontendLogger.debug;
+    window.logInfo = window.FrontendLogger.info;
+    window.logWarn = window.FrontendLogger.warn;
+    window.logError = window.FrontendLogger.error;
+    window.logAuthEvent = window.FrontendLogger.logAuthEvent;
+    window.logSecurityEvent = window.FrontendLogger.logSecurityEvent;
 });
-
-// 🔒 Convenience functions that integrate with backend loggers
-window.logDebug = window.FrontendLogger.debug;
-window.logInfo = window.FrontendLogger.info;
-window.logWarn = window.FrontendLogger.warn;
-window.logError = window.FrontendLogger.error;
-window.logAuthEvent = window.FrontendLogger.logAuthEvent;
-window.logSecurityEvent = window.FrontendLogger.logSecurityEvent;
 
 // 🔒 Global error handler - sends to backend error log
 window.addEventListener('error', (event) => {
-    window.FrontendLogger.error('JavaScript Error', {
-        message: event.message,
-        filename: event.filename,
-        lineno: event.lineno,
-        colno: event.colno,
-        stack: event.error?.stack?.substring(0, 500),
-        error_type: 'javascript_error'
-    });
+    // Ensure logger exists before trying to use it
+    if (window.FrontendLogger) {
+        window.FrontendLogger.error('JavaScript Error', {
+            message: event.message,
+            filename: event.filename,
+            lineno: event.lineno,
+            colno: event.colno,
+            stack: event.error?.stack?.substring(0, 500),
+            error_type: 'javascript_error'
+        });
+    }
 });
 
 // 🔒 Unhandled promise rejection handler
 window.addEventListener('unhandledrejection', (event) => {
-    window.FrontendLogger.error('Unhandled Promise Rejection', {
-        reason: event.reason?.toString()?.substring(0, 500),
-        error_type: 'promise_rejection'
-    });
+    if (window.FrontendLogger) {
+        window.FrontendLogger.error('Unhandled Promise Rejection', {
+            reason: event.reason?.toString()?.substring(0, 500),
+            error_type: 'promise_rejection'
+        });
+    }
 });
 
 // 🔒 Authentication state monitoring (integrates with backend auth logger)
@@ -455,11 +489,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const originalSetItem = localStorage.setItem;
     localStorage.setItem = function(key, value) {
         if (key.toLowerCase().includes('token') || key.toLowerCase().includes('auth')) {
-            window.FrontendLogger.logAuthEvent('Token Storage Change', {
-                action: 'localStorage_set',
-                key: key,
-                storage_type: 'localStorage'
-            });
+            if (window.FrontendLogger) {
+                window.FrontendLogger.logAuthEvent('Token Storage Change', {
+                    action: 'localStorage_set',
+                    key: key,
+                    storage_type: 'localStorage'
+                });
+            }
         }
         return originalSetItem.apply(this, arguments);
     };
@@ -467,11 +503,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const originalRemoveItem = localStorage.removeItem;
     localStorage.removeItem = function(key) {
         if (key.toLowerCase().includes('token') || key.toLowerCase().includes('auth')) {
-            window.FrontendLogger.logAuthEvent('Token Storage Change', {
-                action: 'localStorage_remove',
-                key: key,
-                storage_type: 'localStorage'
-            });
+            if (window.FrontendLogger) {
+                window.FrontendLogger.logAuthEvent('Token Storage Change', {
+                    action: 'localStorage_remove',
+                    key: key,
+                    storage_type: 'localStorage'
+                });
+            }
         }
         return originalRemoveItem.apply(this, arguments);
     };
@@ -480,11 +518,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const originalSessionSetItem = sessionStorage.setItem;
     sessionStorage.setItem = function(key, value) {
         if (key.toLowerCase().includes('token') || key.toLowerCase().includes('auth')) {
-            window.FrontendLogger.logAuthEvent('Token Storage Change', {
-                action: 'sessionStorage_set',
-                key: key,
-                storage_type: 'sessionStorage'
-            });
+            if (window.FrontendLogger) {
+                window.FrontendLogger.logAuthEvent('Token Storage Change', {
+                    action: 'sessionStorage_set',
+                    key: key,
+                    storage_type: 'sessionStorage'
+                });
+            }
         }
         return originalSessionSetItem.apply(this, arguments);
     };
@@ -492,13 +532,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const originalSessionRemoveItem = sessionStorage.removeItem;
     sessionStorage.removeItem = function(key) {
         if (key.toLowerCase().includes('token') || key.toLowerCase().includes('auth')) {
-            window.FrontendLogger.logAuthEvent('Token Storage Change', {
-                action: 'sessionStorage_remove',
-                key: key,
-                storage_type: 'sessionStorage'
-            });
+            if (window.FrontendLogger) {
+                window.FrontendLogger.logAuthEvent('Token Storage Change', {
+                    action: 'sessionStorage_remove',
+                    key: key,
+                    storage_type: 'sessionStorage'
+                });
+            }
         }
         return originalSessionRemoveItem.apply(this, arguments);
     };
 });
-

@@ -342,7 +342,7 @@ class EmailService:
         })
 
         # Use dynamic frontend URL for reset page
-        reset_url = f"{self.frontend_url}/frontend/reset-password.html?token={reset_token}"
+        reset_url = f"{self.frontend_url}/frontend/pages/auth/reset-password.html?token={reset_token}"
         login_url = f"{self.frontend_url}/frontend/pages/auth/login.html"
 
         self.logger.debug("Generated password reset URLs", extra={

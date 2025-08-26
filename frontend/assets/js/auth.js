@@ -13,6 +13,8 @@ class Auth {
         this.csrfToken = null;
     }
 
+
+
     /**
      * Initialize authentication system
      */
@@ -288,20 +290,67 @@ class Auth {
      * 🔒 Request password reset
      */
     async requestPasswordReset(email) {
+        // Initialize call tracking for duplicate prevention
+        if (typeof window._passwordResetCallCount === 'undefined') {
+            window._passwordResetCallCount = 0;
+        }
+        window._passwordResetCallCount++;
+
+        if (window.AppConfig?.isDebug()) {
+            console.log('Auth.requestPasswordReset called', {
+                callCount: window._passwordResetCallCount,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        // Prevent duplicate simultaneous calls
+        if (this._passwordResetInProgress) {
+            if (window.AppConfig?.isDebug()) {
+                console.warn('Duplicate password reset call blocked - already in progress');
+            }
+            return { success: false, error: 'Request already in progress' };
+        }
+
+        this._passwordResetInProgress = true;
+
         try {
-            await this._apiRequest('/auth/forgot-password', {
+            const response = await this._apiRequest('/auth/forgot-password', {
                 method: 'POST',
                 body: JSON.stringify({ email: email.trim() })
             });
 
-            this._showMessage('success', '✅ Reset Email Sent',
-                'If an account exists, you will receive a password reset link.');
+            if (response?.ok) {
+                this._showMessage('success', 'Reset Email Sent',
+                    'If an account exists, you will receive a password reset link.');
+                return { success: true };
+            } else {
+                let errorMessage = 'Unable to send email. Please try again.';
+                switch (response?.status) {
+                    case 429:
+                        errorMessage = 'Too many requests. Please try again later.';
+                        break;
+                    case 500:
+                        errorMessage = 'Server temporarily unavailable. Please try again later.';
+                        break;
+                }
 
-            return { success: true };
+                this._showMessage('error', 'Connection Error', errorMessage);
+                return { success: false, error: errorMessage };
+            }
+
         } catch (error) {
-            console.error('🚨 Password reset request failed:', error.name);
-            this._showMessage('error', '❌ Connection Error', 'Unable to send email. Please try again.');
+            if (window.AppConfig?.isDebug()) {
+                console.error('Password reset request failed:', {
+                    errorName: error.name,
+                    errorMessage: error.message
+                });
+            }
+
+            this._showMessage('error', 'Connection Error', 'Unable to send email. Please try again.');
             return { success: false, error: 'Connection failed' };
+
+        } finally {
+            this._passwordResetInProgress = false;
         }
     }
 
@@ -322,6 +371,50 @@ class Auth {
         } catch (error) {
             console.error('🚨 Username recovery request failed:', error.name);
             this._showMessage('error', '❌ Connection Error', 'Unable to send email. Please try again.');
+            return { success: false, error: 'Connection failed' };
+        }
+    }
+
+    /*
+    Reset password
+    */
+
+    async resetPassword(token, newPassword) {
+        if (window.AppConfig?.isDebug()) {
+            console.log('Auth.resetPassword called', {
+                hasToken: !!token,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        try {
+            const response = await this._apiRequest('/auth/reset-password', {
+                method: 'POST',
+                body: JSON.stringify({
+                    token: token,
+                    new_password: newPassword
+                })
+            });
+
+            if (response?.ok) {
+                this._showMessage('success', 'Password Reset Successful!',
+                    'Your password has been changed. You can now log in.');
+                return { success: true };
+            } else {
+                let errorMessage = 'Password reset failed';
+                switch (response?.status) {
+                    case 400:
+                        errorMessage = 'Invalid or expired reset token';
+                        break;
+                    case 422:
+                        errorMessage = 'Password does not meet requirements';
+                        break;
+                }
+                this._showMessage('error', 'Reset Failed', errorMessage);
+                return { success: false, error: errorMessage };
+            }
+        } catch (error) {
+            this._showMessage('error', 'Connection Error', 'Unable to reset password. Please try again.');
             return { success: false, error: 'Connection failed' };
         }
     }
@@ -366,17 +459,9 @@ class Auth {
             registerForm.addEventListener('submit', this._handleRegisterForm.bind(this));
         }
 
-        // Forgot password form
-        const forgotPasswordForm = document.getElementById('forgotPasswordForm');
-        if (forgotPasswordForm) {
-            forgotPasswordForm.addEventListener('submit', this._handleForgotPasswordForm.bind(this));
-        }
 
-        // Forgot username form
-        const forgotUsernameForm = document.getElementById('forgotUsernameForm');
-        if (forgotUsernameForm) {
-            forgotUsernameForm.addEventListener('submit', this._handleForgotUsernameForm.bind(this));
-        }
+
+
 
         // Logout buttons
         document.addEventListener('click', (e) => {
@@ -457,53 +542,7 @@ class Auth {
         }
     }
 
-    /**
-     * Handle forgot password form
-     */
-    async _handleForgotPasswordForm(e) {
-        e.preventDefault();
 
-        const email = document.getElementById('email')?.value?.trim();
-        const forgotBtn = document.getElementById('forgotBtn');
-
-        if (!email) {
-            this._showMessage('error', '❌ Email Required', 'Please enter your email address.');
-            return;
-        }
-
-        this._clearMessages();
-        this._setButtonLoading(forgotBtn, 'Sending Email...');
-
-        try {
-            await this.requestPasswordReset(email);
-        } finally {
-            this._setButtonLoading(forgotBtn, 'Send Reset Email', false);
-        }
-    }
-
-    /**
-     * Handle forgot username form
-     */
-    async _handleForgotUsernameForm(e) {
-        e.preventDefault();
-
-        const email = document.getElementById('email')?.value?.trim();
-        const forgotBtn = document.getElementById('forgotBtn');
-
-        if (!email) {
-            this._showMessage('error', '❌ Email Required', 'Please enter your email address.');
-            return;
-        }
-
-        this._clearMessages();
-        this._setButtonLoading(forgotBtn, 'Sending Email...');
-
-        try {
-            await this.requestUsernameRecovery(email);
-        } finally {
-            this._setButtonLoading(forgotBtn, 'Send Username', false);
-        }
-    }
 
     /**
      * Setup authentication monitoring

@@ -4,6 +4,25 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>User Management System</title>
+
+    <!-- 🛡️ ENTERPRISE SECURITY HEADERS - 2025 STANDARDS -->
+
+    <!-- ✅ ENHANCED CSP: Complete protection suite -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'self';">
+
+    <!-- ✅ MIME-sniffing protection -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+
+    <!-- ✅ Referrer policy for privacy -->
+    <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+
+    <!-- ✅ DNS prefetch control for privacy -->
+    <meta http-equiv="x-dns-prefetch-control" content="off">
+
+    <!-- ✅ Permissions policy for enhanced security -->
+    <meta http-equiv="Permissions-Policy" content="geolocation=(), microphone=(), camera=()">
+
+    <!-- 🔗 EXTERNAL STYLES -->
     <link rel="stylesheet" href="assets/css/main.css">
 </head>
 <body>
@@ -26,9 +45,17 @@
                 <a href="pages/auth/login.html" class="btn btn-secondary">Sign In</a>
             </div>
         </section>
-    </main>
-    <script src="assets/js/config.js"></script>
 
+        <!-- Security notices container for dynamic messages -->
+        <div class="security-notice" id="securityNotice" style="display: none;">
+            <strong>Security Notice:</strong> <span id="securityMessage"></span>
+        </div>
+
+        <div id="messageContainer"></div>
+    </main>
+
+    <!-- 🔒 SECURE EXTERNAL SCRIPTS -->
+    <script src="assets/js/config.js"></script>
     <script src="assets/js/main.js"></script>
 </body>
 </html>

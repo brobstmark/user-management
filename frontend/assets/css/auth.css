@@ -231,6 +231,24 @@ body {
     color: #27ae60;
 }
 
+/* Success state for links */
+.success-link {
+    background-color: #28a745 !important;
+    border-color: #28a745 !important;
+    color: white !important;
+}
+
+/* Token info styling */
+.token-info {
+    background-color: #fff3cd;
+    border: 1px solid #ffeaa7;
+    color: #856404;
+    padding: 12px;
+    border-radius: 6px;
+    margin: 20px 0;
+    font-size: 13px;
+}
+
 .verification-notice {
     background: #fff3cd;
     border: 1px solid #ffeaa7;

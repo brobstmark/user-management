@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Implementation Diagnostic</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border-left: 4px solid #3498db;
+            background: #f8f9fa;
+        }
+        .test-result {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .pass { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .fail { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .warn { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover { background: #2980b9; }
+        .results { margin-top: 20px; }
+        pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔒 Security Implementation Diagnostic</h1>
+        <p>This tool will help diagnose if your security implementations are working correctly.</p>
+
+        <div class="test-section">
+            <h3>🛡️ Security Headers Test</h3>
+            <p>Checking if CSP and other security headers are present...</p>
+            <button onclick="testSecurityHeaders()">Test Security Headers</button>
+            <div id="headers-result"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>🍪 Cookie Authentication Test</h3>
+            <p>Testing if httpOnly cookie authentication is working...</p>
+            <button onclick="testCookieAuth()">Test Cookie Auth</button>
+            <div id="cookie-result"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>🔒 CSRF Protection Test</h3>
+            <p>Checking if CSRF tokens are being generated and used...</p>
+            <button onclick="testCSRF()">Test CSRF Protection</button>
+            <div id="csrf-result"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>📋 Frontend Storage Check</h3>
+            <p>Verifying no sensitive data is stored in localStorage/sessionStorage...</p>
+            <button onclick="testStorageSecurity()">Check Storage Security</button>
+            <div id="storage-result"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>🔍 Authentication State Test</h3>
+            <p>Testing if authentication state management is working...</p>
+            <button onclick="testAuthState()">Test Auth State</button>
+            <div id="auth-result"></div>
+        </div>
+    </div>
+
+    <script>
+        function showResult(elementId, status, message, details = '') {
+            const element = document.getElementById(elementId);
+            const className = status.toLowerCase();
+            element.innerHTML = `
+                <div class="test-result ${className}">
+                    <strong>${status.toUpperCase()}: ${message}</strong>
+                    ${details ? `<pre>${details}</pre>` : ''}
+                </div>
+            `;
+        }
+
+        async function testSecurityHeaders() {
+            try {
+                const response = await fetch(window.location.href);
+                const headers = {};
+                for (let [key, value] of response.headers.entries()) {
+                    headers[key] = value;
+                }
+
+                const securityHeaders = [
+                    'content-security-policy',
+                    'x-frame-options',
+                    'x-content-type-options',
+                    'x-xss-protection',
+                    'referrer-policy'
+                ];
+
+                const found = securityHeaders.filter(header => headers[header]);
+                const missing = securityHeaders.filter(header => !headers[header]);
+
+                if (found.length >= 3) {
+                    showResult('headers-result', 'PASS',
+                        `Found ${found.length}/5 security headers`,
+                        `Found: ${found.join(', ')}\nMissing: ${missing.join(', ') || 'None'}`
+                    );
+                } else if (found.length > 0) {
+                    showResult('headers-result', 'WARN',
+                        `Found ${found.length}/5 security headers`,
+                        `Found: ${found.join(', ')}\nMissing: ${missing.join(', ')}`
+                    );
+                } else {
+                    showResult('headers-result', 'FAIL',
+                        'No security headers found',
+                        'Security middleware may not be properly configured'
+                    );
+                }
+            } catch (error) {
+                showResult('headers-result', 'FAIL', 'Error testing headers', error.message);
+            }
+        }
+
+        async function testCookieAuth() {
+            try {
+                const response = await fetch('/api/v1/auth/auth-status', {
+                    credentials: 'same-origin'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    showResult('cookie-result', 'PASS',
+                        'Cookie authentication working',
+                        `Authenticated: ${data.authenticated}\nUser: ${data.user ? data.user.email : 'None'}`
+                    );
+                } else if (response.status === 401) {
+                    showResult('cookie-result', 'INFO',
+                        'Cookie auth endpoint working (not logged in)',
+                        'This is expected if you\'re not logged in'
+                    );
+                } else {
+                    showResult('cookie-result', 'WARN',
+                        `Unexpected response: ${response.status}`,
+                        'Cookie auth endpoint may have issues'
+                    );
+                }
+            } catch (error) {
+                showResult('cookie-result', 'FAIL', 'Cookie auth test failed', error.message);
+            }
+        }
+
+        async function testCSRF() {
+            try {
+                const response = await fetch('/api/csrf-token', {
+                    credentials: 'same-origin'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    showResult('csrf-result', 'PASS',
+                        'CSRF token endpoint working',
+                        `Token: ${data.csrf_token ? 'Generated' : 'Missing'}`
+                    );
+                } else {
+                    showResult('csrf-result', 'FAIL',
+                        `CSRF endpoint failed: ${response.status}`,
+                        'CSRF protection may not be configured'
+                    );
+                }
+            } catch (error) {
+                showResult('csrf-result', 'FAIL', 'CSRF test failed', error.message);
+            }
+        }
+
+        function testStorageSecurity() {
+            const sensitiveKeys = ['access_token', 'jwt', 'token', 'auth', 'session'];
+            const foundInLocalStorage = [];
+            const foundInSessionStorage = [];
+
+            // Check localStorage
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (sensitiveKeys.some(sensitive => key.toLowerCase().includes(sensitive))) {
+                    foundInLocalStorage.push(key);
+                }
+            }
+
+            // Check sessionStorage
+            for (let i = 0; i < sessionStorage.length; i++) {
+                const key = sessionStorage.key(i);
+                if (sensitiveKeys.some(sensitive => key.toLowerCase().includes(sensitive))) {
+                    foundInSessionStorage.push(key);
+                }
+            }
+
+            const totalFound = foundInLocalStorage.length + foundInSessionStorage.length;
+
+            if (totalFound === 0) {
+                showResult('storage-result', 'PASS',
+                    'No sensitive data found in browser storage',
+                    'Authentication is properly using httpOnly cookies'
+                );
+            } else {
+                showResult('storage-result', 'FAIL',
+                    'Sensitive data found in browser storage',
+                    `localStorage: ${foundInLocalStorage.join(', ') || 'None'}\nsessionStorage: ${foundInSessionStorage.join(', ') || 'None'}`
+                );
+            }
+        }
+
+        async function testAuthState() {
+            try {
+                // Check if Auth object exists and has the right methods
+                if (typeof window.Auth === 'object') {
+                    const hasNewMethods = typeof window.Auth.authenticatedRequest === 'function' &&
+                                        typeof window.Auth.checkAuthStatus === 'function';
+
+                    const hasOldMethods = typeof window.Auth.setToken === 'function' ||
+                                        typeof window.Auth.getToken === 'function';
+
+                    if (hasNewMethods && !hasOldMethods) {
+                        showResult('auth-result', 'PASS',
+                            'Authentication state management updated',
+                            'Using new cookie-based authentication methods'
+                        );
+                    } else if (hasOldMethods) {
+                        showResult('auth-result', 'FAIL',
+                            'Old authentication methods still present',
+                            'auth.js may not be fully updated to use cookies'
+                        );
+                    } else {
+                        showResult('auth-result', 'WARN',
+                            'Auth object exists but methods unclear',
+                            'Check if auth.js is properly loaded'
+                        );
+                    }
+                } else {
+                    showResult('auth-result', 'WARN',
+                        'Auth object not found',
+                        'auth.js may not be loaded or there\'s a JavaScript error'
+                    );
+                }
+            } catch (error) {
+                showResult('auth-result', 'FAIL', 'Auth state test failed', error.message);
+            }
+        }
+
+        // Auto-run storage test on load
+        document.addEventListener('DOMContentLoaded', () => {
+            testStorageSecurity();
+        });
+    </script>
+</body>
+</html>

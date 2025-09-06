@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forgot Username - User Management System</title>
+
+    <!-- 🛡️ ENTERPRISE SECURITY HEADERS - 2025 STANDARDS -->
+
+    <!-- ✅ ENHANCED CSP: Complete protection suite -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'self';">
+
+    <!-- ✅ MIME-sniffing protection -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+
+    <!-- ✅ Referrer policy for privacy -->
+    <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+
+    <!-- ✅ DNS prefetch control for privacy -->
+    <meta http-equiv="x-dns-prefetch-control" content="off">
+
+    <!-- ✅ Permissions policy for enhanced security -->
+    <meta http-equiv="Permissions-Policy" content="geolocation=(), microphone=(), camera=()">
+
+    <!-- 🔗 EXTERNAL STYLES -->
+    <link rel="stylesheet" href="../../assets/css/main.css">
+    <link rel="stylesheet" href="../../assets/css/auth.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <h1>👤 Forgot Username</h1>
+                <p>Enter your email and we'll send you your username.</p>
+            </div>
+
+            <div class="help-text">
+                <h4>📧 Can't remember your username?</h4>
+                <p>No problem! Enter the email address you used to register, and we'll send your username to your inbox. If you used your email address to log in, that's your username!</p>
+            </div>
+
+            <div class="forgot-info">
+                <h4>💡 How Username Recovery Works:</h4>
+                <ul>
+                    <li>Enter your email address below</li>
+                    <li>Check your inbox for your username reminder</li>
+                    <li>Use your username to log in</li>
+                    <li>If you forgot your password too, use the password reset option</li>
+                </ul>
+            </div>
+
+            <!-- Security notices and form content... -->
+            <div class="security-notice" id="securityNotice" style="display: none;">
+                <strong>Security Notice:</strong> <span id="securityMessage"></span>
+            </div>
+
+            <div class="rate-limit-warning" id="rateLimitWarning" style="display: none;">
+                <strong>⚠️ Too many attempts:</strong> Please wait <span id="rateLimitCountdown">60</span> seconds before trying again.
+            </div>
+
+            <div id="messageContainer"></div>
+
+            <form id="forgotUsernameForm" class="auth-form" novalidate>
+                <div class="form-group">
+                    <label for="email">Email Address:</label>
+                    <input
+                        type="email"
+                        id="email"
+                        name="email"
+                        required
+                        placeholder="Enter your email address"
+                        autocomplete="email"
+                        maxlength="254"
+                        pattern="[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"
+                        title="Please enter a valid email address"
+                        data-validate="email"
+                    >
+                    <div class="validation-message" id="emailValidation"></div>
+                </div>
+
+                <button type="submit" class="auth-btn" id="forgotBtn">
+                    <span class="loading-spinner" id="loadingSpinner"></span>
+                    <span id="buttonText">Send Username</span>
+                </button>
+            </form>
+
+            <div class="security-note">
+                <strong>🛡️ Privacy Notice:</strong> We'll only send username information if the email address is associated with an account. Your account security is protected at all times.
+            </div>
+
+            <div class="auth-links">
+                <a href="login.html">← Back to Login</a>
+                <a href="register.html">Create Account</a>
+                <a href="forgot-password.html">Forgot Password?</a>
+            </div>
+
+            <p style="margin-top: 30px;">
+                <a href="../../index.html" class="back-link">← Back to Home</a>
+            </p>
+        </div>
+    </div>
+
+    <!-- 🔒 SECURE EXTERNAL SCRIPTS -->
+    <script src="../../assets/js/config.js"></script>
+    <script src="../../assets/js/logger.js"></script>
+    <script src="../../assets/js/main.js"></script>
+    <script src="../../assets/js/auth.js"></script>
+    <script src="../../assets/js/forgot-username.js"></script>
+</body>
+</html>

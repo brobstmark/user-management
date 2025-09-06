@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - User Management System</title>
+
+    <!-- 🛡️ SECURITY HEADERS -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self';">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+    <meta http-equiv="x-dns-prefetch-control" content="off">
+    <meta http-equiv="Permissions-Policy" content="geolocation=(), microphone=(), camera=()">
+
+    <!-- 🎨 STYLES -->
+    <link rel="stylesheet" href="../../assets/css/main.css">
+    <link rel="stylesheet" href="../../assets/css/dashboard.css">
+</head>
+<body>
+    <!-- 🔒 MESSAGE CONTAINER -->
+    <div id="messageContainer"></div>
+
+    <div class="header">
+        <div class="header-content">
+            <div class="logo">User Management System</div>
+            <div class="user-menu">
+                <div class="user-info">
+                    <div class="user-avatar" id="userAvatar">👤</div>
+                    <span id="userEmail">Loading...</span>
+                </div>
+                <button class="logout-btn" id="logoutBtn">Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div id="loadingSection" class="loading">
+            <h2>Loading your dashboard...</h2>
+        </div>
+
+        <div id="dashboardContent" style="display: none;">
+            <div class="welcome-section">
+                <h1>Welcome back, <span id="welcomeName">User</span>! 👋</h1>
+                <p>Here's an overview of your account and recent activity.</p>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">📧</div>
+                    <div class="stat-title">Email Status</div>
+                    <div class="stat-value" id="emailStatus">Checking...</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">🔒</div>
+                    <div class="stat-title">Account Security</div>
+                    <div class="stat-value">Protected</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">📅</div>
+                    <div class="stat-title">Member Since</div>
+                    <div class="stat-value" id="memberSince">Loading...</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">⚡</div>
+                    <div class="stat-title">Profile Status</div>
+                    <div class="stat-value" id="profileStatus">Active</div>
+                </div>
+            </div>
+
+            <div class="profile-section">
+                <h2>Your Profile Information</h2>
+                <div class="profile-grid" id="profileGrid">
+                    <!-- Profile information will be loaded here -->
+                </div>
+
+                <div class="actions-section">
+                    <button class="action-btn btn-primary" id="editProfileBtn">Edit Profile</button>
+                    <button class="action-btn btn-secondary" id="changePasswordBtn">Change Password</button>
+                    <button class="action-btn btn-secondary" id="resendVerificationBtn">Resend Verification</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🔒 SECURE SCRIPTS IN PROPER ORDER -->
+    <script src="../../assets/js/config.js"></script>
+    <script src="../../assets/js/auth.js"></script>
+    <script src="../../assets/js/dashboard.js"></script>
+</body>
+</html>

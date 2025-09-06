@@ -9,9 +9,16 @@ import os
 from datetime import datetime
 from typing import Optional
 
+# 🔥 Import secure logging system
+from backend.utils.logging import get_email_logger, log_security_event, log_audit_event
+
 
 class EmailService:
     def __init__(self):
+        # Initialize secure logger for email service
+        self.logger = get_email_logger()
+
+        # SMTP Configuration
         self.smtp_server = settings.EMAIL_HOST
         self.smtp_port = settings.EMAIL_PORT
         self.username = settings.EMAIL_USERNAME
@@ -23,6 +30,22 @@ class EmailService:
         # Keep file fallback for development/testing
         self.fallback_to_file = getattr(settings, 'EMAIL_FALLBACK_TO_FILE', False)
 
+        # Dynamic URL configuration
+        self.frontend_url = settings.FRONTEND_URL
+        self.api_url = settings.API_URL
+        self.environment = settings.ENVIRONMENT
+
+        # Log initialization (PII automatically redacted)
+        self.logger.info("Email service initialized", extra={
+            'environment': self.environment,
+            'smtp_server': self.smtp_server,
+            'smtp_port': self.smtp_port,
+            'use_tls': self.use_tls,
+            'fallback_enabled': self.fallback_to_file,
+            'frontend_url': self.frontend_url,
+            'api_url': self.api_url
+        })
+
     def send_email(
             self,
             to_email: str,
@@ -32,8 +55,17 @@ class EmailService:
     ) -> bool:
         """Send email via SMTP with fallback to file storage"""
 
+        # Log email attempt (email will be automatically redacted)
+        self.logger.info("Initiating email send", extra={
+            'recipient': to_email,  # Will be redacted to [EMAIL_REDACTED]
+            'subject': subject,
+            'method': 'file_fallback' if self.fallback_to_file else 'smtp',
+            'environment': self.environment
+        })
+
         # If fallback is enabled, save to file instead
         if self.fallback_to_file:
+            self.logger.debug("Using file fallback method")
             return self._save_email_to_file(to_email, subject, html_content, text_content)
 
         try:
@@ -47,28 +79,81 @@ class EmailService:
             if text_content:
                 text_part = MIMEText(text_content, "plain")
                 message.attach(text_part)
+                self.logger.debug("Added text content to email")
 
             # Add HTML content
             html_part = MIMEText(html_content, "html")
             message.attach(html_part)
+            self.logger.debug("Added HTML content to email")
 
             # Create secure connection and send
             context = ssl.create_default_context()
 
             with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                self.logger.debug("Establishing SMTP connection")
                 server.starttls(context=context)  # Enable security
+                self.logger.debug("TLS encryption enabled")
+
                 server.login(self.username, self.password)
+                self.logger.debug("SMTP authentication successful")
+
                 server.sendmail(self.from_email, to_email, message.as_string())
 
-            print(f"✅ Email sent successfully to {to_email}")
+            # Log successful send (email redacted automatically)
+            self.logger.info("Email sent successfully via SMTP", extra={
+                'recipient': to_email,  # Will be redacted
+                'method': 'smtp',
+                'environment': self.environment
+            })
+
+            # Log security event for audit trail
+            log_security_event(
+                event_type="email",
+                action="send_email",
+                result="success",
+                method="smtp",
+                environment=self.environment
+            )
+
             return True
 
         except Exception as e:
-            print(f"❌ Failed to send email to {to_email}: {str(e)}")
+            # Log SMTP failure (don't include full exception in production)
+            self.logger.warning("SMTP email send failed, attempting fallback", extra={
+                'recipient': to_email,  # Will be redacted
+                'error_type': type(e).__name__,
+                'smtp_server': self.smtp_server,
+                'smtp_port': self.smtp_port
+            })
+
+            # Log security event for failed email
+            log_security_event(
+                event_type="email",
+                action="send_email",
+                result="smtp_failure",
+                error_type=type(e).__name__
+            )
 
             # Fallback to file storage if SMTP fails
-            print("📁 Falling back to file storage...")
-            return self._save_email_to_file(to_email, subject, html_content, text_content)
+            self.logger.info("Attempting file fallback after SMTP failure")
+            fallback_success = self._save_email_to_file(to_email, subject, html_content, text_content)
+
+            if not fallback_success:
+                # Complete failure - this is serious
+                self.logger.error("Complete email delivery failure", extra={
+                    'recipient': to_email,  # Will be redacted
+                    'smtp_error': type(e).__name__,
+                    'fallback_failed': True
+                })
+
+                log_security_event(
+                    event_type="email",
+                    action="send_email",
+                    result="complete_failure",
+                    error_type=type(e).__name__
+                )
+
+            return fallback_success
 
     def _save_email_to_file(
             self,
@@ -81,6 +166,7 @@ class EmailService:
         try:
             # Create dev_emails directory if it doesn't exist
             os.makedirs("dev_emails", exist_ok=True)
+            self.logger.debug("Created dev_emails directory")
 
             # Create email data
             email_data = {
@@ -89,7 +175,10 @@ class EmailService:
                 "html_content": html_content,
                 "text_content": text_content,
                 "timestamp": datetime.now().isoformat(),
-                "method": "file_fallback"
+                "method": "file_fallback",
+                "environment": self.environment,
+                "frontend_url": self.frontend_url,
+                "api_url": self.api_url
             }
 
             # Save to file with timestamp
@@ -99,17 +188,54 @@ class EmailService:
             with open(filename, 'w') as f:
                 json.dump(email_data, f, indent=2)
 
-            print(f"📁 Email saved to file: {filename}")
+            self.logger.info("Email saved to file successfully", extra={
+                'recipient': to_email,  # Will be redacted
+                'filename': filename,
+                'method': 'file_fallback'
+            })
+
+            # Log audit event for file storage
+            log_audit_event(
+                action="email_file_save",
+                resource="email",
+                result="success",
+                filename=filename
+            )
+
             return True
 
         except Exception as e:
-            print(f"❌ Failed to save email to file: {str(e)}")
+            self.logger.error("Failed to save email to file", extra={
+                'recipient': to_email,  # Will be redacted
+                'error_type': type(e).__name__,
+                'error_message': str(e)
+            })
+
+            log_security_event(
+                event_type="email",
+                action="file_fallback",
+                result="failure",
+                error_type=type(e).__name__
+            )
+
             return False
 
     async def send_verification_email(self, user_email: str, user_name: str, verification_token: str) -> bool:
-        """Send email verification email"""
+        """Send email verification email with dynamic URLs"""
 
-        verification_url = f"http://localhost:8000/api/v1/auth/verify-email?token={verification_token}"
+        self.logger.info("Sending verification email", extra={
+            'email_type': 'verification',
+            'recipient': user_email,  # Will be redacted
+            'user_name': user_name
+        })
+
+        # Use dynamic API URL for verification endpoint
+        verification_url = f"{self.api_url}/api/v1/auth/verify-email?token={verification_token}"
+
+        self.logger.debug("Generated verification URL", extra={
+            'url_type': 'verification',
+            'api_url': self.api_url
+        })
 
         html_template = """
         <!DOCTYPE html>
@@ -128,6 +254,7 @@ class EmailService:
                 .button:hover { background-color: #0056b3; }
                 .footer { text-align: center; color: #666; font-size: 14px; border-top: 1px solid #eee; padding-top: 20px; margin-top: 30px; }
                 .url-fallback { word-break: break-all; background-color: #f8f9fa; padding: 10px; border-radius: 5px; margin-top: 15px; }
+                .env-info { background-color: #e7f3ff; border: 1px solid #b8daff; color: #004085; padding: 10px; border-radius: 5px; margin: 15px 0; font-size: 12px; }
             </style>
         </head>
         <body>
@@ -149,6 +276,12 @@ class EmailService:
                     <div class="url-fallback">{{ verification_url }}</div>
 
                     <p><strong>Important:</strong> This verification link will expire in 24 hours for security reasons.</p>
+
+                    {% if environment == 'development' %}
+                    <div class="env-info">
+                        <strong>🔧 Development Mode:</strong> Environment: {{ environment }} | Frontend: {{ frontend_url }} | API: {{ api_url }}
+                    </div>
+                    {% endif %}
                 </div>
 
                 <div class="footer">
@@ -160,22 +293,62 @@ class EmailService:
         </html>
         """
 
-        # Render template
+        # Render template with dynamic values
         template = Template(html_template)
-        html_content = template.render(verification_url=verification_url, user_name=user_name)
+        html_content = template.render(
+            verification_url=verification_url,
+            user_name=user_name,
+            environment=self.environment,
+            frontend_url=self.frontend_url,
+            api_url=self.api_url
+        )
 
         # Send email
-        return self.send_email(
+        success = self.send_email(
             to_email=user_email,
             subject="Verify Your Email Address - User Management System",
             html_content=html_content,
             text_content=f"Please verify your email by visiting: {verification_url}"
         )
 
-    async def send_password_reset_email(self, user_email: str, user_name: str, reset_token: str) -> bool:
-        """Send password reset email"""
+        # Log the result
+        if success:
+            self.logger.info("Verification email sent successfully", extra={
+                'email_type': 'verification',
+                'recipient': user_email  # Will be redacted
+            })
 
-        reset_url = f"http://localhost:8000/frontend/reset-password.html?token={reset_token}"
+            log_audit_event(
+                action="send_verification_email",
+                resource="user_account",
+                result="success",
+                recipient_email=user_email  # Will be redacted by audit logger
+            )
+        else:
+            self.logger.error("Verification email send failed", extra={
+                'email_type': 'verification',
+                'recipient': user_email  # Will be redacted
+            })
+
+        return success
+
+    async def send_password_reset_email(self, user_email: str, user_name: str, reset_token: str) -> bool:
+        """Send password reset email with dynamic URLs"""
+
+        self.logger.info("Sending password reset email", extra={
+            'email_type': 'password_reset',
+            'recipient': user_email,  # Will be redacted
+            'user_name': user_name
+        })
+
+        # Use dynamic frontend URL for reset page
+        reset_url = f"{self.frontend_url}/frontend/pages/auth/reset-password.html?token={reset_token}"
+        login_url = f"{self.frontend_url}/frontend/pages/auth/login.html"
+
+        self.logger.debug("Generated password reset URLs", extra={
+            'url_type': 'password_reset',
+            'frontend_url': self.frontend_url
+        })
 
         html_template = """
         <!DOCTYPE html>
@@ -195,6 +368,7 @@ class EmailService:
                 .footer { text-align: center; color: #666; font-size: 14px; border-top: 1px solid #eee; padding-top: 20px; margin-top: 30px; }
                 .url-fallback { word-break: break-all; background-color: #f8f9fa; padding: 10px; border-radius: 5px; margin-top: 15px; }
                 .warning { background-color: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 5px; margin: 20px 0; }
+                .env-info { background-color: #e7f3ff; border: 1px solid #b8daff; color: #004085; padding: 10px; border-radius: 5px; margin: 15px 0; font-size: 12px; }
             </style>
         </head>
         <body>
@@ -223,6 +397,12 @@ class EmailService:
                             <li>Your password will remain unchanged until you access the link above</li>
                         </ul>
                     </div>
+
+                    {% if environment == 'development' %}
+                    <div class="env-info">
+                        <strong>🔧 Development Mode:</strong> Environment: {{ environment }} | Frontend: {{ frontend_url }} | API: {{ api_url }}
+                    </div>
+                    {% endif %}
                 </div>
 
                 <div class="footer">
@@ -234,20 +414,63 @@ class EmailService:
         </html>
         """
 
-        # Render template
+        # Render template with dynamic values
         template = Template(html_template)
-        html_content = template.render(reset_url=reset_url, user_name=user_name)
+        html_content = template.render(
+            reset_url=reset_url,
+            user_name=user_name,
+            environment=self.environment,
+            frontend_url=self.frontend_url,
+            api_url=self.api_url
+        )
 
         # Send email
-        return self.send_email(
+        success = self.send_email(
             to_email=user_email,
             subject="🔒 Password Reset Request - User Management System",
             html_content=html_content,
             text_content=f"Password reset requested. Visit: {reset_url} (expires in 1 hour)"
         )
 
+        # Log the result with security context
+        if success:
+            self.logger.info("Password reset email sent successfully", extra={
+                'email_type': 'password_reset',
+                'recipient': user_email  # Will be redacted
+            })
+
+            log_security_event(
+                event_type="password_reset",
+                action="send_reset_email",
+                result="success",
+                recipient_email=user_email  # Will be redacted
+            )
+        else:
+            self.logger.error("Password reset email send failed", extra={
+                'email_type': 'password_reset',
+                'recipient': user_email  # Will be redacted
+            })
+
+            log_security_event(
+                event_type="password_reset",
+                action="send_reset_email",
+                result="failure",
+                recipient_email=user_email  # Will be redacted
+            )
+
+        return success
+
     async def send_username_recovery_email(self, user_email: str, user_name: str, username: str) -> bool:
-        """Send username recovery email"""
+        """Send username recovery email with dynamic URLs"""
+
+        self.logger.info("Sending username recovery email", extra={
+            'email_type': 'username_recovery',
+            'recipient': user_email,  # Will be redacted
+            'user_name': user_name
+        })
+
+        # Use dynamic frontend URL for login page
+        login_url = f"{self.frontend_url}/frontend/pages/auth/login.html"
 
         html_template = """
         <!DOCTYPE html>
@@ -267,6 +490,7 @@ class EmailService:
                 .footer { text-align: center; color: #666; font-size: 14px; border-top: 1px solid #eee; padding-top: 20px; margin-top: 30px; }
                 .button { display: inline-block; background-color: #007bff; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; }
                 .button:hover { background-color: #0056b3; }
+                .env-info { background-color: #e7f3ff; border: 1px solid #b8daff; color: #004085; padding: 10px; border-radius: 5px; margin: 15px 0; font-size: 12px; }
             </style>
         </head>
         <body>
@@ -288,8 +512,14 @@ class EmailService:
                     <p>You can now use this username to log in to your account. If you've also forgotten your password, you can request a password reset.</p>
 
                     <p style="text-align: center; margin: 30px 0;">
-                        <a href="http://localhost:8000/login" class="button">Go to Login</a>
+                        <a href="{{ login_url }}" class="button">Go to Login</a>
                     </p>
+
+                    {% if environment == 'development' %}
+                    <div class="env-info">
+                        <strong>🔧 Development Mode:</strong> Environment: {{ environment }} | Frontend: {{ frontend_url }} | API: {{ api_url }}
+                    </div>
+                    {% endif %}
                 </div>
 
                 <div class="footer">
@@ -301,20 +531,57 @@ class EmailService:
         </html>
         """
 
-        # Render template
+        # Render template with dynamic values
         template = Template(html_template)
-        html_content = template.render(user_name=user_name, username=username or "Not set")
+        html_content = template.render(
+            user_name=user_name,
+            username=username or "Not set",
+            login_url=login_url,
+            environment=self.environment,
+            frontend_url=self.frontend_url,
+            api_url=self.api_url
+        )
 
         # Send email
-        return self.send_email(
+        success = self.send_email(
             to_email=user_email,
             subject="👤 Username Recovery - User Management System",
             html_content=html_content,
-            text_content=f"Your username is: {username or 'Not set'}"
+            text_content=f"Your username is: {username or 'Not set'}. Login at: {login_url}"
         )
 
+        # Log the result
+        if success:
+            self.logger.info("Username recovery email sent successfully", extra={
+                'email_type': 'username_recovery',
+                'recipient': user_email  # Will be redacted
+            })
+
+            log_audit_event(
+                action="send_username_recovery",
+                resource="user_account",
+                result="success",
+                recipient_email=user_email  # Will be redacted
+            )
+        else:
+            self.logger.error("Username recovery email send failed", extra={
+                'email_type': 'username_recovery',
+                'recipient': user_email  # Will be redacted
+            })
+
+        return success
+
     async def send_password_changed_notification(self, user_email: str, user_name: str) -> bool:
-        """Send password changed notification email"""
+        """Send password changed notification email with dynamic URLs"""
+
+        self.logger.info("Sending password changed notification", extra={
+            'email_type': 'password_changed',
+            'recipient': user_email,  # Will be redacted
+            'user_name': user_name
+        })
+
+        # Use dynamic frontend URL for login page
+        login_url = f"{self.frontend_url}/frontend/pages/auth/login.html"
 
         html_template = """
         <!DOCTYPE html>
@@ -332,6 +599,7 @@ class EmailService:
                 .success-box { background-color: #d4edda; border: 2px solid #28a745; padding: 20px; text-align: center; border-radius: 10px; margin: 20px 0; color: #155724; }
                 .footer { text-align: center; color: #666; font-size: 14px; border-top: 1px solid #eee; padding-top: 20px; margin-top: 30px; }
                 .warning { background-color: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 5px; margin: 20px 0; }
+                .env-info { background-color: #e7f3ff; border: 1px solid #b8daff; color: #004085; padding: 10px; border-radius: 5px; margin: 15px 0; font-size: 12px; }
             </style>
         </head>
         <body>
@@ -360,6 +628,12 @@ class EmailService:
                             <li>Enabling two-factor authentication if available</li>
                         </ul>
                     </div>
+
+                    {% if environment == 'development' %}
+                    <div class="env-info">
+                        <strong>🔧 Development Mode:</strong> Environment: {{ environment }} | Frontend: {{ frontend_url }} | API: {{ api_url }}
+                    </div>
+                    {% endif %}
                 </div>
 
                 <div class="footer">
@@ -371,20 +645,51 @@ class EmailService:
         </html>
         """
 
-        # Render template
+        # Render template with dynamic values
         template = Template(html_template)
         html_content = template.render(
             user_name=user_name,
-            timestamp=datetime.now().strftime("%B %d, %Y at %I:%M %p UTC")
+            timestamp=datetime.now().strftime("%B %d, %Y at %I:%M %p UTC"),
+            environment=self.environment,
+            frontend_url=self.frontend_url,
+            api_url=self.api_url
         )
 
         # Send email
-        return self.send_email(
+        success = self.send_email(
             to_email=user_email,
             subject="✅ Password Changed - User Management System",
             html_content=html_content,
-            text_content=f"Your password was successfully changed on {datetime.now().strftime('%B %d, %Y at %I:%M %p UTC')}"
+            text_content=f"Your password was successfully changed on {datetime.now().strftime('%B %d, %Y at %I:%M %p UTC')}. Login at: {login_url}"
         )
+
+        # Log the result with security context (password changes are security events)
+        if success:
+            self.logger.info("Password changed notification sent successfully", extra={
+                'email_type': 'password_changed',
+                'recipient': user_email  # Will be redacted
+            })
+
+            log_security_event(
+                event_type="password_change",
+                action="send_notification",
+                result="success",
+                recipient_email=user_email  # Will be redacted
+            )
+        else:
+            self.logger.error("Password changed notification send failed", extra={
+                'email_type': 'password_changed',
+                'recipient': user_email  # Will be redacted
+            })
+
+            log_security_event(
+                event_type="password_change",
+                action="send_notification",
+                result="failure",
+                recipient_email=user_email  # Will be redacted
+            )
+
+        return success
 
 
 # Create singleton instance
@@ -395,6 +700,7 @@ email_service = EmailService()
 async def send_verification_email(user_email: str, user_name: str, verification_token: str) -> bool:
     """Send verification email - module level function"""
     return await email_service.send_verification_email(user_email, user_name, verification_token)
+
 
 async def send_password_reset_email(user_email: str, user_name: str, reset_token: str) -> bool:
     """Send password reset email - module level function"""

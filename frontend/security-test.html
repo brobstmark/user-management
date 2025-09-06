@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">`
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frontend Security Testing Suite</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .test-section {
+            margin-bottom: 30px;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .test-header {
+            background: #f8f9fa;
+            padding: 15px;
+            border-bottom: 1px solid #e0e0e0;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .test-header:hover {
+            background: #e9ecef;
+        }
+        .test-content {
+            padding: 20px;
+            display: none;
+        }
+        .test-content.active {
+            display: block;
+        }
+        .test-item {
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .test-pass {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .test-fail {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .test-warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        .test-info {
+            background: #d1ecf1;
+            border: 1px solid #b6d4db;
+            color: #0c5460;
+        }
+        .test-status {
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .run-tests-btn {
+            display: block;
+            width: 200px;
+            margin: 20px auto;
+            padding: 15px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .run-tests-btn:hover {
+            background: #0056b3;
+        }
+        .run-tests-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .summary {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .summary h2 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 15px;
+        }
+        .stat {
+            text-align: center;
+        }
+        .stat-number {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+        }
+        .pass { color: #28a745; }
+        .fail { color: #dc3545; }
+        .warn { color: #ffc107; }
+        .info { color: #17a2b8; }
+        .toggle-icon {
+            transition: transform 0.3s;
+        }
+        .toggle-icon.rotated {
+            transform: rotate(180deg);
+        }
+        .test-details {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Frontend Security Testing Suite</h1>
+
+        <div class="summary" id="testSummary">
+            <h2>Security Test Results</h2>
+            <p>Click "Run Security Tests" to validate your frontend security implementation</p>
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-number pass" id="passCount">0</div>
+                    <div class="stat-label">Passed</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number fail" id="failCount">0</div>
+                    <div class="stat-label">Failed</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number warn" id="warnCount">0</div>
+                    <div class="stat-label">Warnings</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number info" id="infoCount">0</div>
+                    <div class="stat-label">Info</div>
+                </div>
+            </div>
+        </div>
+
+        <button class="run-tests-btn" onclick="runAllTests()" id="runTestsBtn">
+            Run Security Tests
+        </button>
+        <button class="run-tests-btn" onclick="exportResults()" id="exportBtn" style="display: none; background: #28a745;">
+    Export Test Results
+</button>
+
+<!-- Export Modal -->
+<div id="exportModal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);">
+    <div style="background-color: white; margin: 5% auto; padding: 20px; border-radius: 10px; width: 80%; max-width: 800px; max-height: 80%; overflow-y: auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2>Security Test Results Export</h2>
+            <button onclick="closeExportModal()" style="background: #dc3545; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer;">Close</button>
+        </div>
+        <div style="margin-bottom: 15px;">
+            <button onclick="copyToClipboard()" id="copyBtn" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-right: 10px;">Copy to Clipboard</button>
+            <small style="color: #666;">Copy this text and paste it into chat for analysis</small>
+        </div>
+        <textarea id="exportText" readonly style="width: 100%; height: 400px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-family: monospace; font-size: 12px; resize: vertical;"></textarea>
+    </div>
+</div>
+        <div class="test-section">
+            <div class="test-header" onclick="toggleSection('xss')">
+                <span><strong>XSS Protection Tests</strong></span>
+                <span class="toggle-icon" id="xss-toggle">v</span>
+            </div>
+            <div class="test-content" id="xss-content">
+                <div id="xss-tests"></div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header" onclick="toggleSection('auth')">
+                <span><strong>Authentication Security Tests</strong></span>
+                <span class="toggle-icon" id="auth-toggle">v</span>
+            </div>
+            <div class="test-content" id="auth-content">
+                <div id="auth-tests"></div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header" onclick="toggleSection('token')">
+                <span><strong>Token Storage Security Tests</strong></span>
+                <span class="toggle-icon" id="token-toggle">v</span>
+            </div>
+            <div class="test-content" id="token-content">
+                <div id="token-tests"></div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header" onclick="toggleSection('validation')">
+                <span><strong>Input Validation Tests</strong></span>
+                <span class="toggle-icon" id="validation-toggle">v</span>
+            </div>
+            <div class="test-content" id="validation-content">
+                <div id="validation-tests"></div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header" onclick="toggleSection('csrf')">
+                <span><strong>CSRF Protection Tests</strong></span>
+                <span class="toggle-icon" id="csrf-toggle">v</span>
+            </div>
+            <div class="test-content" id="csrf-content">
+                <div id="csrf-tests"></div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header" onclick="toggleSection('disclosure')">
+                <span><strong>Information Disclosure Tests</strong></span>
+                <span class="toggle-icon" id="disclosure-toggle">v</span>
+            </div>
+            <div class="test-content" id="disclosure-content">
+                <div id="disclosure-tests"></div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header" onclick="toggleSection('redirect')">
+                <span><strong>Open Redirect Tests</strong></span>
+                <span class="toggle-icon" id="redirect-toggle">v</span>
+            </div>
+            <div class="test-content" id="redirect-content">
+                <div id="redirect-tests"></div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header" onclick="toggleSection('csp')">
+                <span><strong>Content Security Policy Tests</strong></span>
+                <span class="toggle-icon" id="csp-toggle">v</span>
+            </div>
+            <div class="test-content" id="csp-content">
+                <div id="csp-tests"></div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header" onclick="toggleSection('logging')">
+                <span><strong>Logging Security Tests</strong></span>
+                <span class="toggle-icon" id="logging-toggle">v</span>
+            </div>
+            <div class="test-content" id="logging-content">
+                <div id="logging-tests"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/frontend/assets/js/security-test.js"></script>
+
+</body>
+</html>

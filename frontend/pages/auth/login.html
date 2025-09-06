@@ -4,25 +4,113 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - User Management System</title>
-    <link rel="stylesheet" href="../../assets/css/main.css">
+
+    <!-- 🛡️ UPDATED SECURITY HEADERS - 2025 STANDARDS -->
+
+    <!-- ✅ ENHANCED CSP: Includes frame-ancestors to replace X-Frame-Options -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self';">
+
+    <!-- ✅ KEEP: Prevents MIME-sniffing attacks -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+
+
+    <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+
+    <!-- 🆕 ADDED: Prevents DNS prefetching for privacy -->
+    <meta http-equiv="x-dns-prefetch-control" content="off">
+
+    <!-- 🆕 ADDED: Additional security for older browsers -->
+    <meta http-equiv="Permissions-Policy" content="geolocation=(), microphone=(), camera=()">
+
+    <!-- 🔗 EXTERNAL STYLES -->
     <link rel="stylesheet" href="../../assets/css/auth.css">
+    <link rel="stylesheet" href="../../assets/css/main.css">
+    <link rel="stylesheet" href="../../assets/css/login.css">
 </head>
 <body>
+    <!-- Rest of HTML content unchanged -->
     <div class="auth-container">
-        <form class="auth-form" id="loginForm">
-            <h2>Sign In</h2>
+        <div class="auth-header">
+            <h1>🔐 Welcome Back</h1>
+            <p>Sign in to your account</p>
+        </div>
+
+        <!-- Security notices and form content... -->
+        <div class="security-notice" id="securityNotice" style="display: none;">
+            <strong>Security Notice:</strong> <span id="securityMessage"></span>
+        </div>
+
+        <div class="rate-limit-warning" id="rateLimitWarning">
+            <strong>⚠️ Too many attempts:</strong> Please wait <span id="rateLimitCountdown">60</span> seconds before trying again.
+        </div>
+
+        <div id="messageContainer"></div>
+
+        <form id="loginForm" novalidate>
             <div class="form-group">
-                <label for="email">Email</label>
-                <input type="email" id="email" name="email" required>
+                <label for="email">Email Address:</label>
+                <input
+                    type="email"
+                    id="email"
+                    name="email"
+                    required
+                    autocomplete="email"
+                    maxlength="254"
+                    pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                    title="Please enter a valid email address"
+                    data-validate="email"
+                >
+                <div class="validation-message" id="emailValidation"></div>
             </div>
+
             <div class="form-group">
-                <label for="password">Password</label>
-                <input type="password" id="password" name="password" required>
+                <label for="password">Password:</label>
+                <input
+                    type="password"
+                    id="password"
+                    name="password"
+                    required
+                    autocomplete="current-password"
+                    minlength="8"
+                    maxlength="128"
+                    title="Password must be at least 8 characters"
+                    data-validate="password"
+                >
+                <button type="button" class="password-toggle" id="passwordToggle" tabindex="-1">
+                    👁️
+                </button>
+                <div class="validation-message" id="passwordValidation"></div>
             </div>
-            <button type="submit" class="btn btn-primary">Sign In</button>
-            <p><a href="register.html">Don't have an account? Register</a></p>
+
+            <button type="submit" class="auth-btn" id="loginBtn">
+                <span class="loading-spinner" id="loadingSpinner"></span>
+                <span id="buttonText">Sign In</span>
+            </button>
         </form>
+
+        <div class="auth-links">
+            <a href="forgot-password.html">Forgot Password?</a>
+            <a href="forgot-username.html">Forgot Username?</a>
+        </div>
+
+        <div class="divider">
+            <span>New to our platform?</span>
+        </div>
+
+        <div class="auth-links">
+            <a href="register.html">Create an Account →</a>
+        </div>
+
+        <p style="margin-top: 30px;">
+            <a href="../../index.html" class="back-link">← Back to Home</a>
+        </p>
     </div>
+
+    <!-- 🔒 SECURE EXTERNAL SCRIPTS -->
+    <script src="../../assets/js/config.js"></script>
+    <script src="../../assets/js/logger.js"></script>
+    <script src="../../assets/js/main.js"></script>
     <script src="../../assets/js/auth.js"></script>
+    <script src="../../assets/js/login.js"></script>
 </body>
 </html>

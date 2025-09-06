@@ -137,25 +137,9 @@
             return null;
         }
 
-        // Basic token format validation
-        if (token.length < 10 || !/^[a-zA-Z0-9\-_]+$/.test(token)) {
-            displayMessage('Invalid reset token format. Please request a new password reset.', 'error');
-            document.getElementById('resetFormContainer').style.display = 'none';
-
-            // 🔒 Log malformed token
-            if (window.logSecurityEvent) {
-                window.logSecurityEvent('malformed_reset_token', {
-                    page: 'reset-password',
-                    token_length: token.length,
-                    url: window.location.href
-                });
-            }
-            return null;
-        }
-
         // 🔒 Log successful token extraction
         if (window.logInfo) {
-            window.logInfo('Reset token extracted and validated', {
+            window.logInfo('Reset token extracted', {
                 page: 'reset-password',
                 token_length: token.length
             });
@@ -164,7 +148,6 @@
         return token;
     }
 
-    // 🔒 Real-time Input Validation
     function validateInput(input) {
         const value = input.value;
         const type = input.dataset.validate;
@@ -176,13 +159,7 @@
         // Remove previous validation styling
         input.classList.remove('input-validation-error');
 
-        if (type === 'password' && value) {
-            if (!_validatePasswordStrength(value)) {
-                isValid = false;
-                message = 'Password does not meet security requirements';
-            }
-        }
-
+        // Only validate password confirmation matching
         if (type === 'confirmPassword' && value) {
             const password = document.getElementById('password')?.value || '';
             if (value && password !== value) {
@@ -197,16 +174,6 @@
                 input.classList.add('input-validation-error');
                 validationDiv.textContent = message;
                 validationDiv.style.display = 'block';
-
-                // 🔒 Log validation error (rate limited)
-                if (window.logWarn) {
-                    window.logWarn('Input validation failed', {
-                        field: input.id,
-                        validation_type: type,
-                        error: message,
-                        page: 'reset-password'
-                    });
-                }
             } else {
                 validationDiv.style.display = 'none';
             }
@@ -215,36 +182,117 @@
         return isValid;
     }
 
-    // 🔒 Validate password strength
-    function _validatePasswordStrength(password) {
-        if (!password) return false;
 
-        const checks = [
-            password.length >= 8 && password.length <= 128,
-            /[A-Z]/.test(password),
-            /[a-z]/.test(password),
-            /\d/.test(password),
-            /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\?]/.test(password)
-        ];
 
-        return checks.every(check => check);
-    }
-
-    // 🔒 Update password requirements display
+    // Clean password requirements function for 4 basic items + dynamic errors
     function updatePasswordRequirements(password) {
         const requirements = document.querySelectorAll('.password-requirements li');
-        if (requirements.length === 0) return;
 
-        const checks = [
-            password.length >= 8 && password.length <= 128,
-            /[A-Z]/.test(password) && /[a-z]/.test(password),
-            /\d/.test(password),
-            /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\?]/.test(password)
+        // Handle the 4 basic requirements (green/red in list)
+        if (requirements.length > 0) {
+            const checks = [
+                // req-length: 8-100 characters
+                password.length >= 8 && password.length <= 100,
+
+                // req-case: uppercase AND lowercase
+                /[A-Z]/.test(password) && /[a-z]/.test(password),
+
+                // req-number: at least one digit
+                /\d/.test(password),
+
+                // req-special: special character (backend regex)
+                /[!@#$%^&*()_+\-=\[\]{};:"\\|,.<>?]/.test(password)
+            ];
+
+            requirements.forEach((req, index) => {
+                if (req && index < checks.length) {
+                    const isValid = password.length > 0 && checks[index];
+                    req.classList.toggle('valid', isValid);
+                }
+            });
+        }
+
+        // Handle sequential/common password errors as dynamic messages
+        updatePasswordErrors(password);
+    }
+
+    // Show/hide dynamic error messages using existing validation styling
+    function updatePasswordErrors(password) {
+        let errorContainer = document.getElementById('passwordErrors');
+
+        // Create error container if it doesn't exist
+        if (!errorContainer) {
+            errorContainer = document.createElement('div');
+            errorContainer.id = 'passwordErrors';
+            errorContainer.style.display = 'none';
+
+            // Insert after password requirements
+            const requirementsDiv = document.querySelector('.password-requirements');
+            if (requirementsDiv && requirementsDiv.parentNode) {
+                requirementsDiv.parentNode.insertBefore(errorContainer, requirementsDiv.nextSibling);
+            }
+        }
+
+        // Clear existing errors
+        errorContainer.innerHTML = '';
+
+        const errors = [];
+
+        // Check for sequential characters
+        if (password && /(012|123|234|345|456|567|678|789|890|abc|bcd|cde|def)/i.test(password)) {
+            errors.push('Cannot contain sequential characters (123, abc, etc.)');
+        }
+
+        // Check for common passwords
+        if (password && isCommonPassword(password)) {
+            errors.push('Password is too common, please choose a stronger one');
+        }
+
+        // Display errors stacked or hide container
+        if (errors.length > 0) {
+            errors.forEach(error => {
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'validation-message';
+                errorDiv.textContent = error;
+                errorDiv.style.color = '#d73027'; // Use existing error color
+                errorDiv.style.marginBottom = '5px'; // Small gap between errors
+                errorContainer.appendChild(errorDiv);
+            });
+            errorContainer.style.display = 'block';
+        } else {
+            errorContainer.style.display = 'none';
+        }
+    }
+
+    // Helper function to check common passwords and variations
+    function isCommonPassword(password) {
+        const lowerPassword = password.toLowerCase();
+
+        // Exact matches (like backend)
+        const commonPasswords = [
+            'password', 'password123', '12345678', 'qwerty', 'abc123',
+            'password1', '123456789', 'welcome', 'admin', 'letmein'
         ];
 
-        requirements.forEach((req, index) => {
-            req.classList.toggle('valid', checks[index]);
-        });
+        // Check exact matches first
+        if (commonPasswords.includes(lowerPassword)) {
+            return true;
+        }
+
+        // Check if password starts with common weak bases
+        const weakBases = ['password', 'qwerty', 'welcome', 'admin', 'letmein'];
+        for (const base of weakBases) {
+            if (lowerPassword.startsWith(base) && lowerPassword.length <= base.length + 6) {
+                return true; // Catches password!, password2024, admin123, etc.
+            }
+        }
+
+        // Check if password is mostly numbers (weak)
+        if (/^\d+$/.test(password) && password.length <= 12) {
+            return true; // Catches 123456789, 111111111, etc.
+        }
+
+        return false;
     }
 
     // 🔒 Initialize button to correct state
@@ -361,11 +409,6 @@
 
                 if (password !== confirmPassword) {
                     displayMessage('Passwords do not match. Please ensure both password fields are identical.', 'error');
-                    return false;
-                }
-
-                if (!_validatePasswordStrength(password)) {
-                    displayMessage('Password does not meet security requirements. Please ensure your password meets all the requirements listed.', 'error');
                     return false;
                 }
 

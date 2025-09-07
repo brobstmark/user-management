@@ -3,6 +3,7 @@ User model for authentication and user management
 """
 from datetime import datetime
 from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text
+from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
@@ -49,6 +50,7 @@ class User(BaseModel):
     # Preferences
     timezone = Column(String(50), default="UTC", nullable=False)
     language = Column(String(10), default="en", nullable=False)
+    platform_accesses = relationship("UserPlatformAccess", back_populates="user")
 
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email}, is_active={self.is_active})>"

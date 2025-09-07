@@ -101,7 +101,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "/api/v1/auth/reset-password",
             "/api/v1/health",
             "/api/config",
-            "/api/v1/logs/frontend",  # <— add this
+            "/api/v1/logs/frontend",
+            "/api/v1/auth/grant-access",
+            "/api/v1/auth/revoke-access",
+            "/api/v1/auth/check-email",
         }
         if request.url.path in CSRF_EXEMPT_PATHS:
             return

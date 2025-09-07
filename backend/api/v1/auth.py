@@ -5,7 +5,7 @@ Enhanced with Secure Logging and Audit Trail
 from datetime import timedelta, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
-
+from typing import Optional
 from backend.config.database import get_db
 from backend.config.settings import settings
 from backend.core.dependencies import get_current_active_user
@@ -33,8 +33,9 @@ from backend.core.middleware import generate_csrf_token
 from fastapi.responses import JSONResponse
 from fastapi import Response
 from fastapi.responses import JSONResponse
-
-
+from urllib.parse import urlparse
+from backend.crud.platform import has_platform_access, grant_platform_access, get_platform, revoke_platform_access
+from backend.schemas.user import GrantAccessRequest, RevokeAccessRequest
 # 🔥 Import secure logging system
 from backend.utils.logging import (
     get_auth_logger,
@@ -49,11 +50,59 @@ router = APIRouter()
 logger = get_auth_logger()
 
 
+def validate_return_url(return_url: str) -> bool:
+    """
+    Validate return URL to prevent open redirect attacks
+
+    Args:
+        return_url: URL to validate
+
+    Returns:
+        True if URL is allowed, False otherwise
+    """
+    if not return_url:
+        return False
+
+    try:
+        parsed = urlparse(return_url)
+
+        # Allowed domains for your microservice clients
+        allowed_domains = [
+            "localhost:3000",  # Game platform
+            "localhost:4000",  # Future platform
+            "localhost:8000",  # Your auth service itself
+            "127.0.0.1:3000",
+            "127.0.0.1:4000",
+            "127.0.0.1:8000"
+        ]
+
+        # In production, add your real domains:
+        if settings.ENVIRONMENT == "production":
+            allowed_domains.extend([
+                "yourgame.com",
+                "app.yourdomain.com",
+                # etc.
+            ])
+
+        # Check if domain is in allowed list
+        domain_with_port = f"{parsed.hostname}:{parsed.port}" if parsed.port else parsed.hostname
+
+        return any(
+            domain_with_port == allowed or
+            domain_with_port.endswith(f".{allowed}")
+            for allowed in allowed_domains
+        )
+
+    except Exception:
+        return False
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(
-        user_data: UserRegister,
-        request: Request,
-        db: Session = Depends(get_db)
+    user_data: UserRegister,
+    request: Request,
+    return_url: Optional[str] = None,
+    platform_id: Optional[str] = None,  # ADD THIS LINE
+    db: Session = Depends(get_db)
 ):
     """
     Register a new user account and send verification email
@@ -94,6 +143,8 @@ async def register_user(
             ip_address=client_ip,
             email=user_data.email  # Will be redacted
         )
+
+
 
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -180,11 +231,14 @@ async def register_user(
 
 @router.post("/login", response_model=MessageResponse)  # Changed from TokenResponse
 async def login_user(
-        login_data: UserLogin,
-        request: Request,
-        response: Response,
-        db: Session = Depends(get_db)
+    login_data: UserLogin,
+    request: Request,
+    response: Response,
+    return_url: Optional[str] = None,
+    platform_id: Optional[str] = None,
+    db: Session = Depends(get_db)
 ):
+
     """
     User login endpoint with httpOnly cookie authentication
 
@@ -195,6 +249,30 @@ async def login_user(
     """
     # Get client IP for security logging
     client_ip = request.client.host if request.client else "unknown"
+
+    # Validate return URL if provided
+    if return_url and not validate_return_url(return_url):
+        logger.warning("Login attempted with invalid return URL", extra={
+            'action': 'login',
+            'email': login_data.email,
+            'ip_address': client_ip,
+            'invalid_return_url': return_url
+        })
+
+        log_security_event(
+            event_type="authentication",
+            action="invalid_return_url",
+            result="blocked",
+            ip_address=client_ip,
+            return_url=return_url
+        )
+
+        logger.warning(f"Invalid return URL attempted: {return_url}")
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid return URL"
+        )
 
     logger.info("Login attempt", extra={
         'action': 'login',
@@ -322,11 +400,18 @@ async def login_user(
         ip_address=client_ip
     )
 
-    return {
+    # Prepare response data
+    response_data = {
         "message": "Login successful",
         "success": True,
-        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60  # For frontend reference
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     }
+
+    # Add return URL if provided
+    if return_url:
+        response_data["return_url"] = return_url
+
+    return response_data
 
 
 @router.post("/logout", response_model=MessageResponse)
@@ -367,6 +452,7 @@ async def logout_user(
         "message": "Successfully logged out",
         "success": True
     }
+
 
 
 @router.get("/auth-status", response_model=dict)
@@ -1054,6 +1140,149 @@ async def forgot_username(
     }
 
 
+@router.get("/validate", response_model=dict)
+async def validate_external_session(
+    request: Request,
+    platform_id: Optional[str] = None,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Check if someone is logged in (for external services)
+    """
+    client_ip = request.client.host if request.client else "unknown"
+
+    try:
+        # current_user is already provided by the dependency
+        logger.info("External session validation successful", extra={
+            'action': 'validate_external_session',
+            'user_id': current_user.id,
+            'ip_address': client_ip
+        })
+
+        # Check platform access if platform_id provided
+        if platform_id:
+            if not has_platform_access(db, current_user.id, platform_id):
+                print(f"***************************DEBUGGY BUG: User {current_user.id} denied access to platform {platform_id}")
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "valid": False,
+                        "error": "platform_access_denied",
+                        "message": "You don't have access to this platform"
+                    }
+                )
+            print(f"********************************DEBUGGY BUG: User {current_user.id} has access to platform {platform_id}")
+
+        return {
+            "valid": True,
+            "user": {
+                "id": current_user.id,
+                "email": current_user.email,
+                "username": current_user.username,
+                "first_name": current_user.first_name,
+                "last_name": current_user.last_name
+            }
+        }
+
+    except HTTPException:
+        logger.info("External session validation failed", extra={
+            'action': 'validate_external_session',
+            'ip_address': client_ip,
+            'failure_reason': 'invalid_session'
+        })
+
+        return JSONResponse(
+            status_code=401,
+            content={
+                "valid": False,
+                "error": "invalid_session",
+                "message": "Authentication required"
+            }
+        )
+
+
+@router.get("/check-email", response_model=dict)
+async def check_email_exists(
+        email: str,
+        request: Request,
+        db: Session = Depends(get_db)
+):
+    """
+    Check if email exists in auth system (for platforms)
+    """
+    client_ip = request.client.host if request.client else "unknown"
+
+    user = get_user_by_email(db, email.lower())
+
+    logger.info("Email check requested", extra={
+        'action': 'check_email',
+        'email': email,
+        'ip_address': client_ip,
+        'found': user is not None
+    })
+
+    return {
+        "exists": user is not None,
+        "email": email
+    }
+
+
+@router.post("/grant-access", response_model=dict)
+async def grant_platform_access_api(
+    request_data: GrantAccessRequest,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Grant platform access (platform-controlled)
+    """
+    client_ip = request.client.host if request.client else "unknown"
+
+    # TODO: Verify platform_api_key
+    # For now, we'll implement basic validation
+
+    success = grant_platform_access(db, request_data.user_id, request_data.platform_id)
+
+    logger.info("Platform access granted", extra={
+        'action': 'grant_access',
+        'user_id': request_data.user_id,
+        'platform_id': request_data.platform_id,
+        'ip_address': client_ip
+    })
+
+    return {
+        "success": success,
+        "message": f"Access granted to {request_data.platform_id}"
+    }
+
+
+@router.post("/revoke-access", response_model=dict)
+async def revoke_platform_access_api(
+        request_data: RevokeAccessRequest,
+        request: Request,
+        db: Session = Depends(get_db)
+):
+    """
+    Revoke platform access (platform-controlled)
+    """
+    client_ip = request.client.host if request.client else "unknown"
+
+    success = revoke_platform_access(db, request_data.user_id, request_data.platform_id)
+
+    logger.info("Platform access revoked", extra={
+        'action': 'revoke_access',
+        'user_id': request_data.user_id,
+        'platform_id': request_data.platform_id,
+        'ip_address': client_ip,
+        'success': success
+    })
+
+    return {
+        "success": success,
+        "message": f"Access revoked from {request_data.platform_id}" if success else "Access record not found"
+    }
+
 @router.post("/change-password", response_model=MessageResponse)
 async def change_password_endpoint(
         request: PasswordChange,
@@ -1154,3 +1383,4 @@ async def change_password_endpoint(
         "message": "Password has been changed successfully.",
         "success": True
     }
+

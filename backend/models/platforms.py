@@ -17,6 +17,7 @@ class Platform(BaseModel):
     id = Column(String(50), primary_key=True)  # "space-game", "rpg-world"
     name = Column(String(100), nullable=False)  # "Space Adventure Game"
     domain = Column(String(255), nullable=False)  # "spacegame.com"
+    api_key = Column(String(255), nullable=False, unique=True)
     is_active = Column(Boolean, default=True, nullable=False)
 
     # Relationship to user access

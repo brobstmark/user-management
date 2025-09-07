@@ -3,7 +3,7 @@ Authentication Endpoints with Email Verification
 Enhanced with Secure Logging and Audit Trail
 """
 from datetime import timedelta, datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from sqlalchemy.orm import Session
 from typing import Optional
 from backend.config.database import get_db
@@ -95,6 +95,20 @@ def validate_return_url(return_url: str) -> bool:
 
     except Exception:
         return False
+
+
+def verify_platform_api_key(db: Session, platform_id: str, provided_key: str) -> bool:
+    """Check if platform API key is valid"""
+    from backend.crud.platform import get_platform
+
+    platform = get_platform(db, platform_id)
+    if not platform:
+        return False
+
+    # Hash the provided key and compare
+    import hashlib
+    provided_hash = hashlib.sha256(provided_key.encode()).hexdigest()
+    return provided_hash == platform.api_key
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(
@@ -1230,43 +1244,47 @@ async def check_email_exists(
 
 @router.post("/grant-access", response_model=dict)
 async def grant_platform_access_api(
-    request_data: GrantAccessRequest,
-    request: Request,
-    db: Session = Depends(get_db)
+        request_data: GrantAccessRequest,
+        authorization: str = Header(None),
+        db: Session = Depends(get_db)
 ):
-    """
-    Grant platform access (platform-controlled)
-    """
-    client_ip = request.client.host if request.client else "unknown"
+    """Grant platform access - requires API key"""
 
-    # TODO: Verify platform_api_key
-    # For now, we'll implement basic validation
+    # Check for API key
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "API key required")
+
+    api_key = authorization.split(" ")[1]
+
+    # Verify API key belongs to this platform
+    if not verify_platform_api_key(db, request_data.platform_id, api_key):
+        raise HTTPException(403, "Invalid API key")
 
     success = grant_platform_access(db, request_data.user_id, request_data.platform_id)
-
-    logger.info("Platform access granted", extra={
-        'action': 'grant_access',
-        'user_id': request_data.user_id,
-        'platform_id': request_data.platform_id,
-        'ip_address': client_ip
-    })
-
-    return {
-        "success": success,
-        "message": f"Access granted to {request_data.platform_id}"
-    }
+    return {"success": success}
 
 
 @router.post("/revoke-access", response_model=dict)
 async def revoke_platform_access_api(
         request_data: RevokeAccessRequest,
         request: Request,
+        authorization: str = Header(None),
         db: Session = Depends(get_db)
 ):
     """
-    Revoke platform access (platform-controlled)
+    Revoke platform access - requires API key
     """
     client_ip = request.client.host if request.client else "unknown"
+
+    # Check for API key
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "API key required")
+
+    api_key = authorization.split(" ")[1]
+
+    # Verify API key belongs to this platform
+    if not verify_platform_api_key(db, request_data.platform_id, api_key):
+        raise HTTPException(403, "Invalid API key")
 
     success = revoke_platform_access(db, request_data.user_id, request_data.platform_id)
 

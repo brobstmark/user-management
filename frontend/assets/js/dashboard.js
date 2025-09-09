@@ -1,14 +1,14 @@
 /**
- * 🔒 Enterprise Dashboard Management
- * Uses standardized Auth class and AppConfig
- * No sessionStorage - Pure httpOnly cookie authentication
+ * Conversion-Focused Dashboard
+ * Designed to get immediate customer sign-ups
  */
 
-class Dashboard {
+class ConversionDashboard {
     constructor() {
         this.userInfo = null;
-        this.verificationStatus = null;
+        this.platforms = [];
         this.initialized = false;
+        this.isCreatingPlatform = false;
     }
 
     /**
@@ -30,76 +30,54 @@ class Dashboard {
         await this.loadDashboard();
 
         this.initialized = true;
-        console.log('✅ Dashboard initialized');
+        console.log('✅ Conversion Dashboard initialized');
     }
 
     /**
-     * 🔒 Load dashboard data
+     * Load dashboard data and determine state
      */
     async loadDashboard() {
         try {
-            // Check authentication status first
-            const isAuthenticated = await window.Auth.checkAuthStatus();
+            // Load user info (this also checks authentication)
+            this.userInfo = await window.Auth.getUserInfo();
 
-            if (!isAuthenticated) {
-                console.warn('🔐 Not authenticated, redirecting to login');
+            if (!this.userInfo) {
+                console.warn('🔒 Not authenticated, redirecting to login');
                 this._secureRedirect('../auth/login.html');
                 return;
             }
 
-            // Load user profile data
-            await this.loadUserProfile();
+            this._updateUserInterface();
 
-            // Load verification status
-            await this.loadVerificationStatus();
+            // Load existing platforms
+            await this.loadPlatforms();
 
-            // Show dashboard content
+            // Show appropriate state
             this._showDashboard();
 
         } catch (error) {
-            console.error('🚨 Dashboard load failed:', error.name);
+            console.error('🚨 Dashboard load failed:', error);
             this._showError('Failed to load dashboard. Please refresh the page.');
         }
     }
 
     /**
-     * 🔒 Load user profile using Auth class
+     * Load user's existing platforms
      */
-    async loadUserProfile() {
+    async loadPlatforms() {
         try {
-            // Use Auth class to get user info (server-verified)
-            this.userInfo = await window.Auth.getUserInfo();
-
-            if (!this.userInfo) {
-                throw new Error('Failed to get user information');
-            }
-
-            this._updateUserInterface();
-            this._updateProfileGrid();
-
-        } catch (error) {
-            console.error('🚨 Failed to load user profile:', error.name);
-            throw error;
-        }
-    }
-
-    /**
-     * 🔒 Load email verification status
-     */
-    async loadVerificationStatus() {
-        try {
-            const response = await window.Auth._apiRequest('/auth/verification-status', {
+            const response = await window.Auth._apiRequest('/auth/platforms', {
                 method: 'GET'
             });
 
             if (response?.ok) {
-                this.verificationStatus = await response.json();
-                this._updateEmailStatus();
+                this.platforms = await response.json();
             } else {
-                console.warn('⚠️ Could not load verification status');
+                this.platforms = [];
             }
         } catch (error) {
-            console.warn('⚠️ Failed to load verification status:', error.name);
+            console.warn('Could not load platforms:', error);
+            this.platforms = [];
         }
     }
 
@@ -107,106 +85,15 @@ class Dashboard {
      * Update user interface elements
      */
     _updateUserInterface() {
-        const user = this.userInfo;
-
-        // Update header
         const userEmailEl = document.getElementById('userEmail');
-        if (userEmailEl) {
-            userEmailEl.textContent = user.email || '—';
-        }
-
-        // Update welcome name
-        const welcomeNameEl = document.getElementById('welcomeName');
-        if (welcomeNameEl) {
-            const displayName = this._getDisplayName(user);
-            welcomeNameEl.textContent = displayName;
-        }
-
-        // Update avatar
-        const userAvatarEl = document.getElementById('userAvatar');
-        if (userAvatarEl) {
-            const displayName = this._getDisplayName(user);
-            userAvatarEl.textContent = (displayName[0] || 'U').toUpperCase();
-        }
-
-        // Update member since
-        const memberSinceEl = document.getElementById('memberSince');
-        if (memberSinceEl) {
-            const created = user.created_at ? new Date(user.created_at) : null;
-            memberSinceEl.textContent = created ? created.toLocaleDateString() : '—';
-        }
-
-        // Update profile status
-        const profileStatusEl = document.getElementById('profileStatus');
-        if (profileStatusEl) {
-            profileStatusEl.textContent = user.is_active ? 'Active' : 'Inactive';
+        if (userEmailEl && this.userInfo) {
+            const displayName = this._getDisplayName(this.userInfo);
+            userEmailEl.textContent = displayName;
         }
     }
 
     /**
-     * Update profile grid with user data
-     */
-    _updateProfileGrid() {
-        const user = this.userInfo;
-        const profileGrid = document.getElementById('profileGrid');
-
-        if (!profileGrid) return;
-
-        const fullName = this._getFullName(user);
-
-        profileGrid.innerHTML = `
-            <div class="profile-item">
-                <span class="profile-label">Email:</span>
-                <span class="profile-value">${this._sanitizeText(user.email || '—')}</span>
-            </div>
-            <div class="profile-item">
-                <span class="profile-label">Full Name:</span>
-                <span class="profile-value">${this._sanitizeText(fullName || 'Not set')}</span>
-            </div>
-            <div class="profile-item">
-                <span class="profile-label">Username:</span>
-                <span class="profile-value">${this._sanitizeText(user.username || 'Not set')}</span>
-            </div>
-            <div class="profile-item">
-                <span class="profile-label">Phone:</span>
-                <span class="profile-value">${this._sanitizeText(user.phone || 'Not set')}</span>
-            </div>
-            <div class="profile-item">
-                <span class="profile-label">Account Status:</span>
-                <span class="profile-value">
-                    <span class="status-badge ${user.is_active ? 'status-verified' : 'status-pending'}">
-                        ${user.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                </span>
-            </div>
-            <div class="profile-item">
-                <span class="profile-label">Last Login:</span>
-                <span class="profile-value">${this._formatDate(user.last_login) || 'Never'}</span>
-            </div>
-        `;
-    }
-
-    /**
-     * Update email verification status
-     */
-    _updateEmailStatus() {
-        const emailStatusEl = document.getElementById('emailStatus');
-        if (!emailStatusEl || !this.verificationStatus) return;
-
-        if (this.verificationStatus.is_verified === true) {
-            emailStatusEl.textContent = 'Verified ✅';
-            emailStatusEl.style.color = '#28a745';
-        } else if (this.verificationStatus.is_verified === false) {
-            emailStatusEl.textContent = 'Pending ⏳';
-            emailStatusEl.style.color = '#ffc107';
-        } else {
-            emailStatusEl.textContent = 'Unknown';
-            emailStatusEl.style.color = '#6c757d';
-        }
-    }
-
-    /**
-     * Show dashboard content
+     * Show dashboard content based on user state
      */
     _showDashboard() {
         const loadingSection = document.getElementById('loadingSection');
@@ -214,147 +101,507 @@ class Dashboard {
 
         if (loadingSection) loadingSection.style.display = 'none';
         if (dashboardContent) dashboardContent.style.display = 'block';
+
+        // Determine which state to show
+        if (this.platforms.length === 0) {
+            this._showNewUserState();
+        } else {
+            this._showExistingPlatformsState();
+        }
+    }
+
+    /**
+     * Show new user state (conversion-focused)
+     */
+    _showNewUserState() {
+        const newUserState = document.getElementById('newUserState');
+        const successState = document.getElementById('successState');
+        const platformsList = document.getElementById('platformsList');
+
+        if (newUserState) newUserState.style.display = 'block';
+        if (successState) successState.style.display = 'none';
+        if (platformsList) platformsList.style.display = 'none';
+    }
+
+    /**
+     * Show success state after platform creation
+     */
+    _showSuccessState(platformData) {
+        const newUserState = document.getElementById('newUserState');
+        const successState = document.getElementById('successState');
+        const platformsList = document.getElementById('platformsList');
+
+        if (newUserState) newUserState.style.display = 'none';
+        if (successState) successState.style.display = 'block';
+        if (platformsList) platformsList.style.display = 'none';
+
+        // Update success state with platform data
+        this._populateSuccessState(platformData);
+
+        // Update progress indicators
+        this._updateProgressSteps(3);
+    }
+
+    /**
+     * Show existing platforms state
+     */
+    _showExistingPlatformsState() {
+        const newUserState = document.getElementById('newUserState');
+        const successState = document.getElementById('successState');
+        const platformsList = document.getElementById('platformsList');
+
+        if (newUserState) newUserState.style.display = 'none';
+        if (successState) successState.style.display = 'none';
+        if (platformsList) platformsList.style.display = 'block';
+
+        this._populatePlatformsList();
     }
 
     /**
      * Setup event listeners
      */
     setupEventListeners() {
-        // Logout button
+        // Platform creation form
+        const platformForm = document.getElementById('platformForm');
+        if (platformForm) {
+            platformForm.addEventListener('submit', this.handleCreatePlatform.bind(this));
+        }
+
+        // Copy code button
+        const copyCodeBtn = document.getElementById('copyCodeBtn');
+        if (copyCodeBtn) {
+            copyCodeBtn.addEventListener('click', this.handleCopyCode.bind(this));
+        }
+
+        // Action buttons
+        const createAnotherBtn = document.getElementById('createAnotherBtn');
+        if (createAnotherBtn) {
+            createAnotherBtn.addEventListener('click', this.handleCreateAnother.bind(this));
+        }
+
+        const viewDocsBtn = document.getElementById('viewDocsBtn');
+        if (viewDocsBtn) {
+            viewDocsBtn.addEventListener('click', this.handleViewDocs.bind(this));
+        }
+
+        const addPlatformBtn = document.getElementById('addPlatformBtn');
+        if (addPlatformBtn) {
+            addPlatformBtn.addEventListener('click', this.handleAddPlatform.bind(this));
+        }
+
+        // Logout
         const logoutBtn = document.getElementById('logoutBtn');
         if (logoutBtn) {
             logoutBtn.addEventListener('click', this.handleLogout.bind(this));
         }
 
-        // Edit profile button
-        const editProfileBtn = document.getElementById('editProfileBtn');
-        if (editProfileBtn) {
-            editProfileBtn.addEventListener('click', this.handleEditProfile.bind(this));
-        }
+        // Auto-fill domain based on platform name
+        const platformName = document.getElementById('platformName');
+        const platformDomain = document.getElementById('platformDomain');
 
-        // Change password button
-        const changePasswordBtn = document.getElementById('changePasswordBtn');
-        if (changePasswordBtn) {
-            changePasswordBtn.addEventListener('click', this.handleChangePassword.bind(this));
-        }
 
-        // Resend verification button
-        const resendVerificationBtn = document.getElementById('resendVerificationBtn');
-        if (resendVerificationBtn) {
-            resendVerificationBtn.addEventListener('click', this.handleResendVerification.bind(this));
-        }
-
-        // Listen for auth state changes
-        window.addEventListener('authStateChange', this.handleAuthStateChange.bind(this));
-    }
-
-    /**
-     * 🔒 Handle logout
-     */
-    async handleLogout(e) {
-        e.preventDefault();
-
-        try {
-            await window.Auth.logout();
-        } catch (error) {
-            console.error('🚨 Logout failed:', error.name);
-            // Force redirect anyway
-            this._secureRedirect('../auth/login.html');
-        }
-    }
-
-    /**
-     * Handle edit profile
-     */
-    handleEditProfile(e) {
-        e.preventDefault();
-        this._showMessage('info', '🚧 Coming Soon', 'Profile editing will be available in the next update.');
-    }
-
-    /**
-     * Handle change password
-     */
-    handleChangePassword(e) {
-        e.preventDefault();
-        this._showMessage('info', '🚧 Coming Soon', 'Password change will be available in the next update.');
-    }
-
-    /**
-     * 🔒 Handle resend verification
-     */
-    async handleResendVerification(e) {
-        e.preventDefault();
-
-        const button = e.target;
-        const originalText = button.textContent;
-
-        try {
-            // Disable button and show loading
-            button.disabled = true;
-            button.textContent = 'Sending...';
-
-            const response = await window.Auth._apiRequest('/auth/send-verification', {
-                method: 'POST'
+        if (platformName && platformDomain) {
+            platformName.addEventListener('input', (e) => {
+                if (!platformDomain.value) {
+                    const suggestion = this._suggestDomain(e.target.value);
+                    platformDomain.placeholder = suggestion;
+                }
             });
-
-            if (response?.ok) {
-                this._showMessage('success', '✅ Verification Email Sent',
-                    'Please check your inbox for the verification link.');
-
-                // Reload verification status
-                setTimeout(() => this.loadVerificationStatus(), 1000);
-            } else {
-                this._showMessage('error', '❌ Failed to Send Email',
-                    'Please try again later.');
-            }
-        } catch (error) {
-            console.error('🚨 Resend verification failed:', error.name);
-            this._showMessage('error', '❌ Connection Error',
-                'Unable to send email. Please try again.');
-        } finally {
-            // Re-enable button
-            button.disabled = false;
-            button.textContent = originalText;
         }
     }
 
     /**
-     * Handle authentication state changes
+     * Handle platform creation
      */
-    handleAuthStateChange(event) {
-        const { authenticated } = event.detail;
+    async handleCreatePlatform(e) {
+        e.preventDefault();
 
-        if (!authenticated) {
-            console.warn('🔐 Authentication lost, redirecting to login');
-            this._secureRedirect('../auth/login.html');
-        }
-    }
+        if (this.isCreatingPlatform) return;
 
-    /**
-     * 🔒 Secure redirect
-     */
-    _secureRedirect(path) {
-        if (typeof path !== 'string' ||
-            path.startsWith('http://') ||
-            path.startsWith('https://') ||
-            path.startsWith('//') ||
-            path.includes('javascript:') ||
-            path.includes('data:')) {
-            console.error('🚨 Blocked dangerous redirect:', path);
+        const formData = new FormData(e.target);
+        const platformName = formData.get('platformName') || document.getElementById('platformName').value;
+        const platformDomain = formData.get('platformDomain') || document.getElementById('platformDomain').value;
+        const description = formData.get('description') || document.getElementById('description').value;
+        const returnUrl = formData.get('returnUrl') || document.getElementById('returnUrl').value;
+
+        if (!platformName || !platformDomain || !description || !returnUrl) {
+            this._showError('Please fill in all required fields');
             return;
         }
 
-        window.location.href = path;
+        this.isCreatingPlatform = true;
+        this._setButtonLoading(true);
+        this._updateProgressSteps(2);
+
+        try {
+            // Create platform via API
+            const platformData = await this._createPlatformAPI(
+                platformName.trim(),
+                platformDomain.trim(),
+                description.trim(),
+                returnUrl.trim()
+            );
+            if (platformData) {
+                // Add to platforms list
+                this.platforms.push(platformData);
+
+                // Show success state
+                this._showSuccessState(platformData);
+
+                this._showMessage('success', '🎉 Platform Created Successfully!', 'Your integration code is ready to use.');
+            } else {
+                throw new Error('Platform creation failed');
+            }
+
+        } catch (error) {
+            const errorParts = error.message.split('|');
+            const errorType = errorParts.length > 1 ? errorParts[0] : 'validation';
+            const errorMessage = errorParts.length > 1 ? errorParts[1] : error.message;
+
+            this._showError(errorMessage || 'Unable to create platform', errorType);
+            this._updateProgressSteps(1);
+        } finally {
+            this.isCreatingPlatform = false;
+            this._setButtonLoading(false);
+        }
     }
 
     /**
-     * 🔒 Show secure message
+     * Create platform via API
+     */
+    async _createPlatformAPI(name, domain, description, returnUrl) {
+        try {
+            const response = await window.Auth._apiRequest('/auth/create-platform', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name: name,
+                    domain: domain,
+                    description: description,
+                    return_url: returnUrl
+                })
+            });
+
+            if (response?.ok) {
+                const data = await response.json();
+                return {
+                    id: data.platform.id,
+                    name: data.platform.name,
+                    slug: data.platform.slug,
+                    domain: data.platform.domain,
+                    api_key: data.api_key,
+                    api_key_prefix: data.platform.api_key_prefix,
+                    created_at: data.platform.created_at,
+                    is_active: data.platform.is_active
+                };
+            } else {
+                const errorData = await response.json();
+                this._handleApiError(response.status, errorData);
+            }
+
+        } catch (error) {
+            if (error.name === 'TypeError' || error.message.includes('fetch')) {
+                throw new Error('network|Unable to connect to server. Please check your internet connection.');
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Handle API error responses with specific user-friendly messages
+     */
+    _handleApiError(status, errorData) {
+        const firstError = errorData.detail?.errors?.[0] || errorData.detail?.message || '';
+
+        // Domain-specific errors
+        if (firstError.includes('domain') && (firstError.includes('already') || firstError.includes('exists'))) {
+            throw new Error('validation|This domain is already in use. Please choose a different domain.');
+        }
+
+        // Name conflicts
+        if (firstError.includes('name') && (firstError.includes('already') || firstError.includes('exists'))) {
+            throw new Error('validation|This platform name is taken. Please choose a different name.');
+        }
+
+        // Invalid domain format
+        if (firstError.includes('invalid domain') || firstError.includes('domain format')) {
+            throw new Error('validation|Please enter a valid domain (example: myapp.com)');
+        }
+
+        // Invalid URL format
+        if (firstError.includes('return_url') || firstError.includes('Invalid URL') || firstError.includes('url')) {
+            throw new Error('validation|Please enter a valid URL starting with https://');
+        }
+
+        // Rate limiting
+        if (status === 429) {
+            throw new Error('network|Too many requests. Please wait a moment and try again.');
+        }
+
+        // Server errors
+        if (status >= 500) {
+            throw new Error('network|Server temporarily unavailable. Please try again in a few minutes.');
+        }
+
+        // Authentication errors
+        if (status === 401) {
+            throw new Error('network|Session expired. Please refresh the page and try again.');
+        }
+
+        // Default fallback
+        throw new Error('validation|Unable to create platform. Please check your information and try again.');
+    }
+
+    /**
+     * Clear existing error styling
+     */
+    _clearErrors() {
+        // Remove form field error styling
+        document.querySelectorAll('.form-group.error').forEach(group => {
+            group.classList.remove('error');
+        });
+
+        // Clear message container
+        const messageContainer = document.getElementById('messageContainer');
+        if (messageContainer) {
+            messageContainer.innerHTML = '';
+        }
+    }
+
+    /**
+     * Populate success state with platform data
+     */
+    _populateSuccessState(platformData) {
+        // Update platform details
+        const platformIdEl = document.getElementById('createdPlatformId');
+        const apiKeyEl = document.getElementById('createdApiKey');
+        const domainEl = document.getElementById('createdDomain');
+
+        if (platformIdEl) platformIdEl.textContent = platformData.id;
+        if (apiKeyEl) apiKeyEl.textContent = platformData.api_key;
+        if (domainEl) domainEl.textContent = platformData.domain;
+
+        // Generate and display integration code
+        const integrationCode = this._generateIntegrationCode(platformData);
+        const codeEl = document.getElementById('integrationCode');
+        if (codeEl) {
+            codeEl.textContent = integrationCode;
+        }
+    }
+
+    /**
+     * Generate integration code for the platform
+     */
+    _generateIntegrationCode(platformData) {
+        const baseUrl = window.AppConfig?.api?.baseUrl || '/api/v1';
+
+        return `<!-- Add this to your website's HTML -->
+<script>
+async function checkAuth() {
+    try {
+        const response = await fetch('${baseUrl}/auth/validate?platform_id=${platformData.id}', {
+            credentials: 'include'
+        });
+        const data = await response.json();
+
+        if (data.valid) {
+            // User is logged in - show your content
+            showYourContent(data.user);
+        } else {
+            // Redirect to login
+            const returnUrl = encodeURIComponent(window.location.href);
+            window.location.href = '/frontend/pages/auth/login.html?return_url=' + returnUrl + '&platform_id=${platformData.id}';
+        }
+    } catch (error) {
+        // Redirect to login on error
+        window.location.href = '/frontend/pages/auth/login.html?platform_id=${platformData.id}';
+    }
+}
+
+function showYourContent(user) {
+    // Replace this with your app's content
+    document.body.innerHTML = '<h1>Welcome, ' + user.email + '!</h1><p>You are now logged in.</p>';
+}
+
+// Check authentication when page loads
+window.onload = checkAuth;
+</script>`;
+    }
+
+    /**
+     * Handle copy code button
+     */
+    handleCopyCode(e) {
+        e.preventDefault();
+
+        const codeEl = document.getElementById('integrationCode');
+        if (!codeEl) return;
+
+        const code = codeEl.textContent;
+
+        // Copy to clipboard
+        navigator.clipboard.writeText(code).then(() => {
+            // Update button temporarily
+            const btn = e.target;
+            const originalText = btn.textContent;
+            btn.textContent = 'Copied!';
+            btn.style.background = '#48bb78';
+
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.style.background = '';
+            }, 2000);
+
+            this._showMessage('success', '📋 Code Copied!', 'Integration code copied to clipboard.');
+        }).catch(err => {
+            console.error('Copy failed:', err);
+            this._showError('Failed to copy code. Please select and copy manually.');
+        });
+    }
+
+    /**
+     * Handle create another platform
+     */
+    handleCreateAnother(e) {
+        e.preventDefault();
+
+        // Reset form
+        const form = document.getElementById('platformForm');
+        if (form) form.reset();
+
+        // Show new user state again
+        this._showNewUserState();
+        this._updateProgressSteps(1);
+    }
+
+    /**
+     * Handle view documentation
+     */
+    handleViewDocs(e) {
+        e.preventDefault();
+        // TODO: Open documentation in new tab
+        this._showMessage('info', '📖 Coming Soon', 'Comprehensive documentation will be available soon.');
+    }
+
+    /**
+     * Handle add platform (for existing users)
+     */
+    handleAddPlatform(e) {
+        e.preventDefault();
+        this._showNewUserState();
+    }
+
+    /**
+     * Handle logout
+     */
+    async handleLogout(e) {
+        e.preventDefault();
+        try {
+            await window.Auth.logout();
+        } catch (error) {
+            console.error('Logout failed:', error);
+            this._secureRedirect('../auth/login.html');
+        }
+    }
+
+    /**
+     * Update progress steps
+     */
+    _updateProgressSteps(activeStep) {
+        const steps = document.querySelectorAll('.step');
+        steps.forEach((step, index) => {
+            if (index + 1 <= activeStep) {
+                step.classList.add('active');
+            } else {
+                step.classList.remove('active');
+            }
+        });
+    }
+
+    /**
+     * Set button loading state
+     */
+    _setButtonLoading(loading) {
+        const btn = document.getElementById('createBtn');
+        const btnText = btn?.querySelector('.btn-text');
+        const btnLoading = btn?.querySelector('.btn-loading');
+
+        if (!btn) return;
+
+        if (loading) {
+            btn.disabled = true;
+            if (btnText) btnText.style.display = 'none';
+            if (btnLoading) btnLoading.style.display = 'block';
+        } else {
+            btn.disabled = false;
+            if (btnText) btnText.style.display = 'block';
+            if (btnLoading) btnLoading.style.display = 'none';
+        }
+    }
+
+
+
+    /**
+     * Suggest domain based on platform name
+     */
+    _suggestDomain(name) {
+        if (!name) return 'myapp.com';
+
+        const clean = name.toLowerCase()
+            .replace(/[^a-zA-Z0-9]+/g, '')
+            .substring(0, 20);
+
+        return clean ? `${clean}.com` : 'myapp.com';
+    }
+
+    /**
+     * Populate platforms list (for existing users)
+     */
+    _populatePlatformsList() {
+        const grid = document.getElementById('platformsGrid');
+        if (!grid) return;
+
+        if (this.platforms.length === 0) {
+            grid.innerHTML = '<p>No platforms created yet.</p>';
+            return;
+        }
+
+        grid.innerHTML = this.platforms.map(platform => `
+            <div class="platform-card">
+                <h3>${this._sanitizeText(platform.name)}</h3>
+                <p>${this._sanitizeText(platform.domain)}</p>
+                <div class="platform-actions">
+                    <button class="btn-secondary">Manage</button>
+                    <button class="btn-primary">View Code</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    /**
+     * Get display name from user object
+     */
+    _getDisplayName(user) {
+        if (user.first_name && user.last_name) {
+            return `${user.first_name} ${user.last_name}`;
+        } else if (user.first_name) {
+            return user.first_name;
+        } else if (user.username) {
+            return user.username;
+        } else if (user.email) {
+            return user.email.split('@')[0];
+        }
+        return 'User';
+    }
+
+    /**
+     * Show message to user
      */
     _showMessage(type, title, description = '') {
         const messageContainer = document.getElementById('messageContainer');
-
         if (!messageContainer) {
-            // Fallback to alert if no container
             alert(`${title}: ${description}`);
             return;
         }
@@ -386,59 +633,73 @@ class Dashboard {
                 }
             }, 5000);
         }
+
+        // Scroll to top to show message
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     /**
      * Show error message
      */
-    _showError(message) {
-        this._showMessage('error', '❌ Error', message);
-    }
+    _showError(message, type = 'validation') {
+        // Clear any existing errors first
+        this._clearErrors();
 
-    /**
-     * Get display name from user object
-     */
-    _getDisplayName(user) {
-        if (user.first_name && user.last_name) {
-            return `${user.first_name} ${user.last_name}`;
-        } else if (user.first_name) {
-            return user.first_name;
-        } else if (user.username) {
-            return user.username;
-        } else if (user.email) {
-            return user.email.split('@')[0];
-        }
-        return 'User';
-    }
+        // Different styling based on error type
+        const errorClass = type === 'network' ? 'error-network' : 'error-validation';
 
-    /**
-     * Get full name from user object
-     */
-    _getFullName(user) {
-        if (user.first_name && user.last_name) {
-            return `${user.first_name} ${user.last_name}`;
-        } else if (user.first_name) {
-            return user.first_name;
-        }
-        return null;
-    }
+        this._showMessage('error', 'Unable to Create Platform', message);
 
-    /**
-     * Format date for display
-     */
-    _formatDate(dateString) {
-        if (!dateString) return null;
-
-        try {
-            const date = new Date(dateString);
-            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-        } catch (error) {
-            return null;
+        // For validation errors, also highlight the relevant form fields
+        if (type === 'validation') {
+            this._highlightErrorFields(message);
         }
     }
 
     /**
-     * 🔒 Sanitize text for display (prevent XSS)
+    * Highlight error fields
+    */
+    _highlightErrorFields(errorMessage) {
+        // Remove existing error styling
+        document.querySelectorAll('.form-group.error').forEach(group => {
+            group.classList.remove('error');
+        });
+
+        // Add error styling based on message content
+        if (errorMessage.toLowerCase().includes('domain')) {
+            const domainGroup = document.getElementById('platformDomain')?.closest('.form-group');
+            domainGroup?.classList.add('error');
+        }
+
+        if (errorMessage.toLowerCase().includes('name')) {
+            const nameGroup = document.getElementById('platformName')?.closest('.form-group');
+            nameGroup?.classList.add('error');
+        }
+
+        if (errorMessage.toLowerCase().includes('url')) {
+            const urlGroup = document.getElementById('returnUrl')?.closest('.form-group');
+            urlGroup?.classList.add('error');
+        }
+    }
+
+    /**
+     * Secure redirect
+     */
+    _secureRedirect(path) {
+        if (typeof path !== 'string' ||
+            path.startsWith('http://') ||
+            path.startsWith('https://') ||
+            path.startsWith('//') ||
+            path.includes('javascript:') ||
+            path.includes('data:')) {
+            console.error('🚨 Blocked dangerous redirect:', path);
+            return;
+        }
+        window.location.href = path;
+    }
+
+    /**
+     * Sanitize text for display
      */
     _sanitizeText(text) {
         const div = document.createElement('div');
@@ -450,16 +711,15 @@ class Dashboard {
      * Cleanup
      */
     destroy() {
-        // Remove event listeners if needed
         this.initialized = false;
     }
 }
 
-// 🔒 Create and expose global instance
+// Create and expose global instance
 (function() {
     'use strict';
 
-    const dashboardInstance = new Dashboard();
+    const dashboardInstance = new ConversionDashboard();
 
     try {
         Object.defineProperty(window, 'Dashboard', {

@@ -1,0 +1,93 @@
+```
+PLATFORM INTEGRATION INSTRUCTIONS
+=================================
+
+STEP 1: REGISTER YOUR PLATFORM
+------------------------------
+1. Run: python register_platform.py
+2. Enter platform name and domain
+3. Save the API key that gets generated
+
+STEP 2: BACKEND SERVER INTEGRATION
+----------------------------------
+1. Install requests: pip install requests
+
+2. Create auth_client.py:
+import requests
+
+class AuthServiceClient:
+    def __init__(self, api_key, platform_id, auth_url="http://localhost:8000"):
+        self.auth_url = auth_url
+        self.headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json'
+        }
+        self.platform_id = platform_id
+
+    def grant_user_access(self, user_id):
+        response = requests.post(
+            f"{self.auth_url}/api/v1/auth/grant-access",
+            headers=self.headers,
+            json={'user_id': user_id, 'platform_id': self.platform_id}
+        )
+        return response.json()
+
+    def revoke_user_access(self, user_id):
+        response = requests.post(
+            f"{self.auth_url}/api/v1/auth/revoke-access",
+            headers=self.headers,
+            json={'user_id': user_id, 'platform_id': self.platform_id}
+        )
+        return response.json()
+
+3. Use in your server:
+from auth_client import AuthServiceClient
+
+auth = AuthServiceClient(
+    api_key="pk_YOUR_API_KEY_HERE",
+    platform_id="your-platform-id"
+)
+
+# Grant access when user joins
+result = auth.grant_user_access(user_id=123)
+
+# Revoke access when user leaves
+result = auth.revoke_user_access(user_id=123)
+
+STEP 3: FRONTEND INTEGRATION
+---------------------------
+Add this JavaScript to your platform's HTML:
+
+async function checkAuthAndRedirect() {
+    try {
+        const response = await fetch('/api/v1/auth/validate?platform_id=YOUR_PLATFORM_ID', {
+            credentials: 'include'
+        });
+        const data = await response.json();
+
+        if (data.valid) {
+            // User is logged in - show your game/app
+            showYourContent(data.user);
+        } else {
+            // Redirect to login
+            const returnUrl = encodeURIComponent(window.location.href);
+            window.location.href = `/frontend/pages/auth/login.html?return_url=${returnUrl}&platform_id=YOUR_PLATFORM_ID`;
+        }
+    } catch (error) {
+        // Redirect to login on error
+        window.location.href = '/frontend/pages/auth/login.html';
+    }
+}
+
+window.onload = checkAuthAndRedirect;
+
+STEP 4: REPLACE PLACEHOLDERS
+---------------------------
+- Replace "pk_YOUR_API_KEY_HERE" with your actual API key
+- Replace "YOUR_PLATFORM_ID" with your actual platform ID
+- Replace "your-platform-id" with your actual platform ID
+
+DONE
+----
+Your platform can now authenticate users through the auth service.
+```

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Game Platform Test</title>
+</head>
+<body>
+    <h1>Game Platform Test</h1>
+    <div id="status"></div>
+    <button onclick="checkAuthAndRedirect()">Check Auth Status</button>
+    <button onclick="logout()" style="margin-left: 10px;">Logout</button>
+
+    <div id="user-info" style="margin-top: 20px; display: none;">
+        <h2>Welcome!</h2>
+        <div id="user-details"></div>
+    </div>
+
+    <script>
+        // Check auth status when page loads
+        window.onload = function() {
+            checkAuthAndRedirect();
+        };
+
+        async function checkAuthAndRedirect() {
+            try {
+                const response = await fetch('/api/v1/auth/validate?platform_id=test-microservice', {
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+
+                if (data.valid) {
+                    // User is logged in
+                    document.getElementById('status').innerHTML =
+                        `<p style="color: green;">✅ Authenticated</p>`;
+
+                    document.getElementById('user-details').innerHTML =
+                        `<p>Email: ${data.user.email}</p>
+                         <p>Name: ${data.user.first_name || 'Not set'}</p>`;
+
+                    document.getElementById('user-info').style.display = 'block';
+                } else {
+                    // User is not logged in - redirect to auth service
+                    redirectToLogin();
+                }
+            } catch (error) {
+                document.getElementById('status').innerHTML =
+                    `<p style="color: red;">❌ Error checking auth</p>`;
+                // On error, also redirect to login
+                redirectToLogin();
+            }
+        }
+
+        function redirectToLogin() {
+            document.getElementById('status').innerHTML =
+                `<p style="color: orange;">🔄 Not logged in - redirecting to login...</p>`;
+
+            // Redirect to auth service with return URL
+            const returnUrl = encodeURIComponent(window.location.href);
+            const loginUrl = `/frontend/pages/auth/login.html?return_url=${returnUrl}&platform_id=test-microservice`;
+
+            setTimeout(() => {
+                window.location.href = loginUrl;
+            }, 1000); // Small delay so user can see the message
+        }
+
+        async function logout() {
+            try {
+                // Get CSRF token first
+                const csrfResponse = await fetch('/api/v1/auth/csrf-token', {
+                    credentials: 'include'
+                });
+
+                let headers = {};
+                if (csrfResponse.ok) {
+                    const csrfData = await csrfResponse.json();
+                    headers['X-CSRF-Token'] = csrfData.csrf_token;
+                }
+
+                // Now logout with CSRF token
+                await fetch('/api/v1/auth/logout', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: headers
+                });
+
+                // Show logged out message and option to login again
+                document.getElementById('status').innerHTML =
+                    `<p style="color: blue;">👋 Logged out successfully</p>
+                     <button onclick="redirectToLogin()">Login Again</button>`;
+
+                document.getElementById('user-info').style.display = 'none';
+
+            } catch (error) {
+                document.getElementById('status').innerHTML =
+                    `<p style="color: red;">❌ Logout error</p>`;
+            }
+        }
+    </script>
+</body>
+</html>

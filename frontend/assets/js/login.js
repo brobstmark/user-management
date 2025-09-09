@@ -1,14 +1,17 @@
-// File: frontend/assets/js/login.js
-// 🔒 Secure Login Page JavaScript - CSP Compliant
+/**
+ * Clean Login Page Controller
+ * Responsibilities: Form validation, UI state management, user interaction
+ * Does NOT handle: API calls, authentication logic, session management
+ */
 
 (function() {
     'use strict';
 
-    // 🔒 Private scope to prevent global pollution
+    // Private scope variables
     let isSubmitting = false;
     let activeTimers = [];
 
-    // 🔒 Secure timer management
+    // Secure timer management
     function createSecureTimer(callback, interval) {
         const timerId = setInterval(callback, interval);
         activeTimers.push(timerId);
@@ -28,24 +31,19 @@
         activeTimers = [];
     }
 
-    // 🔒 XSS-Safe Message Display Function
+    // XSS-Safe Message Display
     function displayMessage(message, type = 'info') {
         const container = document.getElementById('messageContainer');
         if (!container) return;
 
-        // Clear previous messages
         container.innerHTML = '';
         if (!message) return;
 
-        // 🛡️ XSS PROTECTION: Create element safely
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${type}`;
-
-        // 🛡️ XSS PROTECTION: Use textContent instead of innerHTML
         messageDiv.textContent = String(message).substring(0, 500);
         container.appendChild(messageDiv);
 
-        // Auto-remove success messages after 5 seconds
         if (type === 'success') {
             setTimeout(() => {
                 if (messageDiv.parentNode) {
@@ -55,7 +53,7 @@
         }
     }
 
-    // 🔒 Rate Limiting Display with secure timer
+    // Rate Limiting Display
     function showRateLimitWarning(seconds) {
         const warning = document.getElementById('rateLimitWarning');
         const countdown = document.getElementById('rateLimitCountdown');
@@ -64,15 +62,6 @@
             countdown.textContent = seconds;
             warning.style.display = 'block';
 
-            // 🔒 Log rate limiting event
-            if (window.logSecurityEvent) {
-                window.logSecurityEvent('rate_limit_warning_displayed', {
-                    seconds_remaining: seconds,
-                    page: 'login'
-                });
-            }
-
-            // 🔒 Secure countdown timer
             const timerId = createSecureTimer(() => {
                 seconds--;
                 countdown.textContent = seconds;
@@ -80,19 +69,12 @@
                 if (seconds <= 0) {
                     clearSecureTimer(timerId);
                     warning.style.display = 'none';
-
-                    // 🔒 Log rate limit expiry
-                    if (window.logInfo) {
-                        window.logInfo('Rate limit warning expired', {
-                            page: 'login'
-                        });
-                    }
                 }
             }, 1000);
         }
     }
 
-    // 🔒 Security Notice Display
+    // Security Notice Display
     function showSecurityNotice(message) {
         const notice = document.getElementById('securityNotice');
         const messageSpan = document.getElementById('securityMessage');
@@ -101,22 +83,13 @@
             messageSpan.textContent = String(message).substring(0, 200);
             notice.style.display = 'block';
 
-            // 🔒 Log security notice
-            if (window.logSecurityEvent) {
-                window.logSecurityEvent('security_notice_displayed', {
-                    message: message,
-                    page: 'login'
-                });
-            }
-
-            // Auto-hide after 10 seconds
             setTimeout(() => {
                 notice.style.display = 'none';
             }, 10000);
         }
     }
 
-    // 🔒 Real-time Input Validation
+    // Input Validation
     function validateInput(input) {
         const value = input.value;
         const type = input.dataset.validate;
@@ -125,11 +98,9 @@
         let isValid = true;
         let message = '';
 
-        // Remove previous validation styling
         input.classList.remove('input-validation-error');
 
         if (type === 'email' && value) {
-            // 🔒 More strict email validation
             const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
             if (!emailRegex.test(value) || value.length > 254) {
                 isValid = false;
@@ -150,16 +121,6 @@
                 input.classList.add('input-validation-error');
                 validationDiv.textContent = message;
                 validationDiv.style.display = 'block';
-
-                // 🔒 Log validation error (rate limited)
-                if (window.logWarn) {
-                    window.logWarn('Input validation failed', {
-                        field: input.id,
-                        validation_type: type,
-                        error: message,
-                        page: 'login'
-                    });
-                }
             } else {
                 validationDiv.style.display = 'none';
             }
@@ -168,10 +129,10 @@
         return isValid;
     }
 
-    // 🔒 Prevent XSS in URL parameters
+    // URL Parameter Sanitization
     function sanitizeUrlParams() {
         const urlParams = new URLSearchParams(window.location.search);
-        const allowedParams = ['redirect', 'email'];
+        const allowedParams = ['redirect', 'email', 'return_url'];
 
         let paramsCleaned = false;
         for (const [key, value] of urlParams.entries()) {
@@ -181,37 +142,107 @@
             }
         }
 
-        // 🔒 Log parameter sanitization
-        if (paramsCleaned && window.logSecurityEvent) {
-            window.logSecurityEvent('url_parameters_sanitized', {
-                action: 'remove_disallowed_params',
-                page: 'login'
-            });
-        }
-
         // Pre-fill email if provided and valid
         const email = urlParams.get('email');
         if (email) {
-            // 🔒 Strict validation before prefilling
             const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
             if (emailRegex.test(email) && email.length <= 254) {
                 const emailInput = document.getElementById('email');
                 if (emailInput) {
                     emailInput.value = email;
-
-                    // 🔒 Log email prefill
-                    if (window.logInfo) {
-                        window.logInfo('Email prefilled from URL parameter', {
-                            action: 'email_prefill',
-                            page: 'login'
-                        });
-                    }
                 }
             }
         }
     }
 
-    // 🔒 Initialize event listeners
+    // Button Loading State Management
+    function setButtonLoadingState(button, loadingText, isLoading = true) {
+        if (!button) return;
+
+        if (isLoading) {
+            button.disabled = true;
+            const spinner = button.querySelector('#loadingSpinner');
+            const buttonText = button.querySelector('#buttonText');
+
+            if (spinner) spinner.style.display = 'inline-block';
+            if (buttonText) buttonText.textContent = loadingText;
+        } else {
+            button.disabled = false;
+            const spinner = button.querySelector('#loadingSpinner');
+            const buttonText = button.querySelector('#buttonText');
+
+            if (spinner) spinner.style.display = 'none';
+            if (buttonText) buttonText.textContent = loadingText;
+        }
+    }
+
+    // Main Login Form Handler
+    async function handleLoginFormSubmission(e) {
+        e.preventDefault();
+
+        // Prevent double submission
+        if (isSubmitting) {
+            console.warn('Duplicate form submission blocked');
+            return;
+        }
+
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+        const loginBtn = document.getElementById('loginBtn');
+
+        if (!emailInput || !passwordInput) {
+            displayMessage('Form elements not found', 'error');
+            return;
+        }
+
+        // Validate inputs
+        const emailValid = validateInput(emailInput);
+        const passwordValid = validateInput(passwordInput);
+
+        if (!emailValid || !passwordValid) {
+            displayMessage('Please fix the validation errors before submitting.', 'error');
+            return;
+        }
+
+        const email = emailInput.value.trim();
+        const password = passwordInput.value;
+
+        if (!email || !password) {
+            displayMessage('Please enter both email and password.', 'error');
+            return;
+        }
+
+        // Set loading state
+        isSubmitting = true;
+        setButtonLoadingState(loginBtn, 'Signing In...', true);
+        displayMessage(''); // Clear messages
+
+        try {
+            // Call auth API (auth.js responsibility)
+            if (!window.Auth || typeof window.Auth.login !== 'function') {
+                throw new Error('Authentication system not available');
+            }
+
+            const result = await window.Auth.login(email, password);
+            console.log('LOGIN RESPONSE:', result);
+            if (result.success) {
+                displayMessage('Login successful! Redirecting...', 'success');
+                // Auth.js handles the redirect
+            } else {
+                displayMessage(result.error || 'Login failed', 'error');
+            }
+
+        } catch (error) {
+            console.error('Login error:', error);
+            displayMessage('Connection error. Please try again.', 'error');
+        } finally {
+            // Reset form state
+            isSubmitting = false;
+            setButtonLoadingState(loginBtn, 'Sign In', false);
+        }
+    }
+
+    // Initialize Event Listeners
     function initializeEventListeners() {
         // Password visibility toggle
         const passwordToggle = document.getElementById('passwordToggle');
@@ -223,17 +254,6 @@
                 const isPassword = passwordInput.type === 'password';
                 passwordInput.type = isPassword ? 'text' : 'password';
                 this.textContent = isPassword ? '🙈' : '👁️';
-
-                // 🔒 Log password visibility toggle
-                if (window.logInfo) {
-                    window.logInfo('Password visibility toggled', {
-                        action: 'password_toggle',
-                        visible: !isPassword,
-                        page: 'login'
-                    });
-                }
-
-                // Refocus password input
                 passwordInput.focus();
             });
         }
@@ -254,81 +274,17 @@
             });
         }
 
-        // 🔒 Form submission with race condition protection
+        // Form submission handler
         const loginForm = document.getElementById('loginForm');
         if (loginForm) {
-            loginForm.addEventListener('submit', function(e) {
-                e.preventDefault();
-
-                // 🔒 Prevent double submission
-                if (isSubmitting) {
-                    if (window.logWarn) {
-                        window.logWarn('Blocked duplicate form submission', {
-                            page: 'login'
-                        });
-                    }
-                    return;
-                }
-
-                // 🔒 Log login attempt
-                if (window.logAuthEvent) {
-                    window.logAuthEvent('login_form_submission', {
-                        action: 'form_submit',
-                        page: 'login',
-                        user_agent: navigator.userAgent.substring(0, 100)
-                    });
-                }
-
-                // Validate all inputs before submission
-                const emailValid = validateInput(emailInput);
-                const passwordValid = validateInput(passwordInput);
-
-                if (!emailValid || !passwordValid) {
-                    displayMessage('Please fix the validation errors before submitting.', 'error');
-
-                    // 🔒 Log validation failure
-                    if (window.logSecurityEvent) {
-                        window.logSecurityEvent('login_validation_failure', {
-                            email_valid: emailValid,
-                            password_valid: passwordValid,
-                            page: 'login'
-                        });
-                    }
-
-                    return;
-                }
-
-                // Set submitting state
-                isSubmitting = true;
-                const submitButton = document.getElementById('loginBtn');
-                const spinner = document.getElementById('loadingSpinner');
-                const buttonText = document.getElementById('buttonText');
-
-                if (submitButton) submitButton.disabled = true;
-                if (spinner) spinner.style.display = 'inline-block';
-                if (buttonText) buttonText.textContent = 'Signing In...';
-
-                // Continue with auth.js login logic
-                if (window.handleLogin) {
-                    window.handleLogin(e).finally(() => {
-                        // Reset submission state
-                        isSubmitting = false;
-                        if (submitButton) submitButton.disabled = false;
-                        if (spinner) spinner.style.display = 'none';
-                        if (buttonText) buttonText.textContent = 'Sign In';
-                    });
-                } else {
-                    // Reset if no handler
-                    isSubmitting = false;
-                    if (submitButton) submitButton.disabled = false;
-                    if (spinner) spinner.style.display = 'none';
-                    if (buttonText) buttonText.textContent = 'Sign In';
-                }
-            });
+            // Remove any existing listeners
+            loginForm.removeEventListener('submit', handleLoginFormSubmission);
+            // Add our clean handler
+            loginForm.addEventListener('submit', handleLoginFormSubmission);
         }
     }
 
-    // 🔒 Secure global function exposure with read-only protection
+    // Expose necessary functions globally for backward compatibility
     function exposeSecureFunctions() {
         try {
             Object.defineProperty(window, 'displayMessage', {
@@ -349,14 +305,14 @@
                 configurable: false
             });
         } catch (e) {
-            // Fallback to regular assignment if defineProperty fails
+            // Fallback if defineProperty fails
             window.displayMessage = displayMessage;
             window.showRateLimitWarning = showRateLimitWarning;
             window.showSecurityNotice = showSecurityNotice;
         }
     }
 
-    // 🔒 Cleanup on page unload
+    // Cleanup on page unload
     function setupCleanup() {
         window.addEventListener('beforeunload', function() {
             clearAllTimers();
@@ -367,29 +323,15 @@
         });
     }
 
-    // 🔒 Security Monitoring
+    // Security Monitoring
     function setupSecurityMonitoring() {
         window.addEventListener('error', function(e) {
-            // Log to console for development
             console.error('JavaScript Error:', e.message);
-
-            // 🔒 Log to backend security system
-            if (window.logError) {
-                window.logError('JavaScript Error on Login Page', {
-                    message: e.message,
-                    filename: e.filename,
-                    lineno: e.lineno,
-                    page: 'login',
-                    error_type: 'javascript_error'
-                });
-            }
-
-            // Don't expose error details to users
             displayMessage('An unexpected error occurred. Please try again.', 'error');
         });
     }
 
-    // 🔒 Initialize everything when DOM is ready
+    // Initialize everything when DOM is ready
     document.addEventListener('DOMContentLoaded', function() {
         sanitizeUrlParams();
         initializeEventListeners();
@@ -397,14 +339,7 @@
         setupCleanup();
         setupSecurityMonitoring();
 
-        // 🔒 Log page initialization
-        if (window.logInfo) {
-            window.logInfo('Login page initialized', {
-                page: 'login',
-                url: window.location.href,
-                referrer: document.referrer || 'direct'
-            });
-        }
+        console.log('Login page controller initialized');
     });
 
 })();

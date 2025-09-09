@@ -108,6 +108,7 @@ pip install -r requirements.txt
 
 # Optional: Install development tools
 pip install alembic pytest black isort
+# There is also requirements-dev.txt
 ```
 
 ### **5. Run Database Migrations**
@@ -120,6 +121,7 @@ alembic upgrade head
 ```bash
 # Start FastAPI server
 python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+# OR ./scripts/start-dev.sh
 ```
 
 ### **7. Access Your Application**

@@ -365,6 +365,17 @@ class UserUpdate(BaseModel):
                 raise ValueError(f'Language must be one of: {", ".join(sorted(ALLOWED_LANGUAGES))}')
         return v
 
+class GrantAccessRequest(BaseModel):
+    """What platforms send when granting access"""
+    user_id: int
+    platform_id: str
+    platform_api_key: str
+
+class RevokeAccessRequest(BaseModel):
+    """What platforms send when revoking access"""
+    user_id: int
+    platform_id: str
+    platform_api_key: str
 
 class PasswordChange(BaseModel):
     """
@@ -452,6 +463,8 @@ class MessageResponse(BaseModel):
     message: str
     success: bool = True
     timestamp: Optional[datetime] = Field(default_factory=lambda: datetime.utcnow())
+    expires_in: Optional[int] = None
+    return_url: Optional[str] = None
 
     @field_validator('message')
     @classmethod

@@ -85,7 +85,17 @@
                                     <input type="text" id="platformDomain" placeholder="myapp.com" required>
                                 </div>
                             </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="returnUrl">Return URL (where users go after login)</label>
+                                    <input type="url" id="returnUrl" placeholder="https://myapp.com/dashboard" required>
+                                </div>
 
+                                <div class="form-group">
+                                    <label for="description">Description</label>
+                                    <input type="text" id="description" placeholder="Main authentication for my app" required>
+                                </div>
+                            </div>
                             <button type="submit" class="create-btn" id="createBtn">
                                 <span class="btn-text">Create Platform & Get Code</span>
                                 <span class="btn-loading" style="display: none;">Creating...</span>

@@ -66,17 +66,15 @@ class ConversionDashboard {
      */
     async loadPlatforms() {
         try {
-            // Note: This endpoint doesn't exist yet - we'll need to create it
-            // For now, assume empty array (new user state)
-            this.platforms = [];
+            const response = await window.Auth._apiRequest('/auth/platforms', {
+                method: 'GET'
+            });
 
-            // TODO: Implement when backend endpoint is ready
-            // const response = await window.Auth._apiRequest('/auth/platforms', {
-            //     method: 'GET'
-            // });
-            // if (response?.ok) {
-            //     this.platforms = await response.json();
-            // }
+            if (response?.ok) {
+                this.platforms = await response.json();
+            } else {
+                this.platforms = [];
+            }
         } catch (error) {
             console.warn('Could not load platforms:', error);
             this.platforms = [];
@@ -200,6 +198,8 @@ class ConversionDashboard {
         // Auto-fill domain based on platform name
         const platformName = document.getElementById('platformName');
         const platformDomain = document.getElementById('platformDomain');
+
+
         if (platformName && platformDomain) {
             platformName.addEventListener('input', (e) => {
                 if (!platformDomain.value) {
@@ -221,8 +221,10 @@ class ConversionDashboard {
         const formData = new FormData(e.target);
         const platformName = formData.get('platformName') || document.getElementById('platformName').value;
         const platformDomain = formData.get('platformDomain') || document.getElementById('platformDomain').value;
+        const description = formData.get('description') || document.getElementById('description').value;
+        const returnUrl = formData.get('returnUrl') || document.getElementById('returnUrl').value;
 
-        if (!platformName || !platformDomain) {
+        if (!platformName || !platformDomain || !description || !returnUrl) {
             this._showError('Please fill in all required fields');
             return;
         }
@@ -233,8 +235,12 @@ class ConversionDashboard {
 
         try {
             // Create platform via API
-            const platformData = await this._createPlatformAPI(platformName.trim(), platformDomain.trim());
-
+            const platformData = await this._createPlatformAPI(
+                platformName.trim(),
+                platformDomain.trim(),
+                description.trim(),
+                returnUrl.trim()
+            );
             if (platformData) {
                 // Add to platforms list
                 this.platforms.push(platformData);
@@ -248,8 +254,11 @@ class ConversionDashboard {
             }
 
         } catch (error) {
-            console.error('Platform creation failed:', error);
-            this._showError('Failed to create platform. Please try again.');
+            const errorParts = error.message.split('|');
+            const errorType = errorParts.length > 1 ? errorParts[0] : 'validation';
+            const errorMessage = errorParts.length > 1 ? errorParts[1] : error.message;
+
+            this._showError(errorMessage || 'Unable to create platform', errorType);
             this._updateProgressSteps(1);
         } finally {
             this.isCreatingPlatform = false;
@@ -260,29 +269,8 @@ class ConversionDashboard {
     /**
      * Create platform via API
      */
-    async _createPlatformAPI(name, domain) {
+    async _createPlatformAPI(name, domain, description, returnUrl) {
         try {
-            // Since we don't have the backend endpoint yet, simulate the API call
-            // TODO: Replace with actual API call when endpoint is ready
-
-            // Simulate API delay for better UX
-            await new Promise(resolve => setTimeout(resolve, 1500));
-
-            // Generate mock platform data (replace with real API response)
-            const platformId = this._generatePlatformId(name);
-            const apiKey = this._generateMockApiKey();
-
-            const platformData = {
-                id: platformId,
-                name: name,
-                domain: domain,
-                api_key: apiKey,
-                created_at: new Date().toISOString(),
-                is_active: true
-            };
-
-            // TODO: Replace this mock with actual API call:
-            /*
             const response = await window.Auth._apiRequest('/auth/create-platform', {
                 method: 'POST',
                 headers: {
@@ -290,22 +278,95 @@ class ConversionDashboard {
                 },
                 body: JSON.stringify({
                     name: name,
-                    domain: domain
+                    domain: domain,
+                    description: description,
+                    return_url: returnUrl
                 })
             });
 
             if (response?.ok) {
-                return await response.json();
+                const data = await response.json();
+                return {
+                    id: data.platform.id,
+                    name: data.platform.name,
+                    slug: data.platform.slug,
+                    domain: data.platform.domain,
+                    api_key: data.api_key,
+                    api_key_prefix: data.platform.api_key_prefix,
+                    created_at: data.platform.created_at,
+                    is_active: data.platform.is_active
+                };
             } else {
-                throw new Error('API request failed');
+                const errorData = await response.json();
+                this._handleApiError(response.status, errorData);
             }
-            */
-
-            return platformData;
 
         } catch (error) {
-            console.error('API call failed:', error);
+            if (error.name === 'TypeError' || error.message.includes('fetch')) {
+                throw new Error('network|Unable to connect to server. Please check your internet connection.');
+            }
             throw error;
+        }
+    }
+
+    /**
+     * Handle API error responses with specific user-friendly messages
+     */
+    _handleApiError(status, errorData) {
+        const firstError = errorData.detail?.errors?.[0] || errorData.detail?.message || '';
+
+        // Domain-specific errors
+        if (firstError.includes('domain') && (firstError.includes('already') || firstError.includes('exists'))) {
+            throw new Error('validation|This domain is already in use. Please choose a different domain.');
+        }
+
+        // Name conflicts
+        if (firstError.includes('name') && (firstError.includes('already') || firstError.includes('exists'))) {
+            throw new Error('validation|This platform name is taken. Please choose a different name.');
+        }
+
+        // Invalid domain format
+        if (firstError.includes('invalid domain') || firstError.includes('domain format')) {
+            throw new Error('validation|Please enter a valid domain (example: myapp.com)');
+        }
+
+        // Invalid URL format
+        if (firstError.includes('return_url') || firstError.includes('Invalid URL') || firstError.includes('url')) {
+            throw new Error('validation|Please enter a valid URL starting with https://');
+        }
+
+        // Rate limiting
+        if (status === 429) {
+            throw new Error('network|Too many requests. Please wait a moment and try again.');
+        }
+
+        // Server errors
+        if (status >= 500) {
+            throw new Error('network|Server temporarily unavailable. Please try again in a few minutes.');
+        }
+
+        // Authentication errors
+        if (status === 401) {
+            throw new Error('network|Session expired. Please refresh the page and try again.');
+        }
+
+        // Default fallback
+        throw new Error('validation|Unable to create platform. Please check your information and try again.');
+    }
+
+    /**
+     * Clear existing error styling
+     */
+    _clearErrors() {
+        // Remove form field error styling
+        document.querySelectorAll('.form-group.error').forEach(group => {
+            group.classList.remove('error');
+        });
+
+        // Clear message container
+        const messageContainer = document.getElementById('messageContainer');
+        if (messageContainer) {
+            messageContainer.innerHTML = '';
         }
     }
 
@@ -480,27 +541,7 @@ window.onload = checkAuth;
         }
     }
 
-    /**
-     * Generate platform ID from name
-     */
-    _generatePlatformId(name) {
-        return name.toLowerCase()
-            .replace(/[^a-zA-Z0-9]+/g, '-')
-            .replace(/^-+|-+$/g, '')
-            .substring(0, 50);
-    }
 
-    /**
-     * Generate mock API key (replace with server-generated key)
-     */
-    _generateMockApiKey() {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        let result = 'pk_';
-        for (let i = 0; i < 32; i++) {
-            result += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return result;
-    }
 
     /**
      * Suggest domain based on platform name
@@ -600,8 +641,45 @@ window.onload = checkAuth;
     /**
      * Show error message
      */
-    _showError(message) {
-        this._showMessage('error', '❌ Error', message);
+    _showError(message, type = 'validation') {
+        // Clear any existing errors first
+        this._clearErrors();
+
+        // Different styling based on error type
+        const errorClass = type === 'network' ? 'error-network' : 'error-validation';
+
+        this._showMessage('error', 'Unable to Create Platform', message);
+
+        // For validation errors, also highlight the relevant form fields
+        if (type === 'validation') {
+            this._highlightErrorFields(message);
+        }
+    }
+
+    /**
+    * Highlight error fields
+    */
+    _highlightErrorFields(errorMessage) {
+        // Remove existing error styling
+        document.querySelectorAll('.form-group.error').forEach(group => {
+            group.classList.remove('error');
+        });
+
+        // Add error styling based on message content
+        if (errorMessage.toLowerCase().includes('domain')) {
+            const domainGroup = document.getElementById('platformDomain')?.closest('.form-group');
+            domainGroup?.classList.add('error');
+        }
+
+        if (errorMessage.toLowerCase().includes('name')) {
+            const nameGroup = document.getElementById('platformName')?.closest('.form-group');
+            nameGroup?.classList.add('error');
+        }
+
+        if (errorMessage.toLowerCase().includes('url')) {
+            const urlGroup = document.getElementById('returnUrl')?.closest('.form-group');
+            urlGroup?.classList.add('error');
+        }
     }
 
     /**

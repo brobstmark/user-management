@@ -50,6 +50,9 @@ class User(BaseModel):
     # Preferences
     timezone = Column(String(50), default="UTC", nullable=False)
     language = Column(String(10), default="en", nullable=False)
+
+    # Relationships for platforms
+    platforms = relationship("Platform", back_populates="owner")
     platform_accesses = relationship("UserPlatformAccess", back_populates="user")
 
     def __repr__(self):

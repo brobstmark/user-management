@@ -43,12 +43,37 @@ from backend.utils.logging import (
     log_security_event,
     log_audit_event
 )
-
+from backend.crud.platform import create_platform, get_user_platforms
+from pydantic import BaseModel
 router = APIRouter()
 
 # Initialize auth logger
 logger = get_auth_logger()
 
+
+class PlatformCreateRequest(BaseModel):
+    name: str
+    domain: str
+    description: str
+    return_url: str
+
+class PlatformResponse(BaseModel):
+    id: int
+    name: str
+    slug: str
+    domain: str
+    description: str = None
+    return_url: str = None
+    api_key_prefix: str
+    is_active: bool
+    is_verified: bool
+    created_at: str
+
+class PlatformCreateResponse(BaseModel):
+    success: bool
+    platform: PlatformResponse
+    api_key: str  # Raw API key (only returned once)
+    message: str
 
 def validate_return_url(return_url: str) -> bool:
     """
@@ -109,6 +134,133 @@ def verify_platform_api_key(db: Session, platform_id: str, provided_key: str) ->
     import hashlib
     provided_hash = hashlib.sha256(provided_key.encode()).hexdigest()
     return provided_hash == platform.api_key
+
+
+@router.post("/create-platform", response_model=PlatformCreateResponse)
+async def create_platform_endpoint(
+        platform_data: PlatformCreateRequest,
+        request: Request,
+        current_user: User = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+):
+    """
+    Create a new platform for the authenticated user
+
+    Requires authentication. Returns the platform details and API key.
+    The API key is only shown once - save it securely.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+
+    logger.info("Platform creation requested", extra={
+        'action': 'create_platform',
+        'user_id': current_user.id,
+        'platform_name': platform_data.name,
+        'domain': platform_data.domain,
+        'ip_address': client_ip
+    })
+
+    # Create the platform
+    result = create_platform(
+        db=db,
+        user_id=current_user.id,
+        name=platform_data.name,
+        domain=platform_data.domain,
+        description=platform_data.description,
+        return_url=platform_data.return_url
+    )
+
+    if not result["success"]:
+        logger.warning("Platform creation failed", extra={
+            'action': 'create_platform',
+            'user_id': current_user.id,
+            'errors': result["errors"],
+            'ip_address': client_ip
+        })
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Platform creation failed",
+                "errors": result["errors"]
+            }
+        )
+
+    platform = result["platform"]
+    api_key = result["api_key"]
+
+    # Log successful platform creation
+    logger.info("Platform created successfully", extra={
+        'action': 'create_platform',
+        'user_id': current_user.id,
+        'platform_id': platform.id,
+        'platform_slug': platform.slug,
+        'domain': platform.domain,
+        'ip_address': client_ip
+    })
+
+    log_audit_event(
+        action="create_platform",
+        resource="platform",
+        result="success",
+        user_id=current_user.id,
+        platform_id=platform.id,
+        ip_address=client_ip
+    )
+
+    # Return platform data and API key
+    return PlatformCreateResponse(
+        success=True,
+        platform=PlatformResponse(
+            id=platform.id,
+            name=platform.name,
+            slug=platform.slug,
+            domain=platform.domain,
+            description=platform.description,
+            return_url=platform.return_url,
+            api_key_prefix=platform.api_key_prefix,
+            is_active=platform.is_active,
+            is_verified=platform.is_verified,
+            created_at=platform.created_at.isoformat()
+        ),
+        api_key=api_key,
+        message="Platform created successfully! Save your API key securely - it won't be shown again."
+    )
+
+
+@router.get("/platforms", response_model=list[PlatformResponse])
+async def get_user_platforms_endpoint(
+        request: Request,
+        current_user: User = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+):
+    """
+    Get all platforms owned by the authenticated user
+    """
+    client_ip = request.client.host if request.client else "unknown"
+
+    logger.debug("User platforms requested", extra={
+        'action': 'get_user_platforms',
+        'user_id': current_user.id,
+        'ip_address': client_ip
+    })
+
+    platforms = get_user_platforms(db, current_user.id)
+
+    return [
+        PlatformResponse(
+            id=platform.id,
+            name=platform.name,
+            slug=platform.slug,
+            domain=platform.domain,
+            description=platform.description,
+            return_url=platform.return_url,
+            api_key_prefix=platform.api_key_prefix,
+            is_active=platform.is_active,
+            is_verified=platform.is_verified,
+            created_at=platform.created_at.isoformat()
+        )
+        for platform in platforms
+    ]
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(

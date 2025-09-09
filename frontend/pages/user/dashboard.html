@@ -3,29 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - User Management System</title>
+    <title>Get Started - User Management System</title>
 
-    <!-- 🛡️ SECURITY HEADERS -->
+    <!-- Security Headers -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self';">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
     <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
-    <meta http-equiv="x-dns-prefetch-control" content="off">
-    <meta http-equiv="Permissions-Policy" content="geolocation=(), microphone=(), camera=()">
 
-    <!-- 🎨 STYLES -->
+    <!-- Styles -->
     <link rel="stylesheet" href="../../assets/css/main.css">
     <link rel="stylesheet" href="../../assets/css/dashboard.css">
 </head>
 <body>
-    <!-- 🔒 MESSAGE CONTAINER -->
+    <!-- Message Container -->
     <div id="messageContainer"></div>
 
+    <!-- Header -->
     <div class="header">
         <div class="header-content">
             <div class="logo">User Management System</div>
             <div class="user-menu">
                 <div class="user-info">
-                    <div class="user-avatar" id="userAvatar">👤</div>
                     <span id="userEmail">Loading...</span>
                 </div>
                 <button class="logout-btn" id="logoutBtn">Logout</button>
@@ -33,59 +31,202 @@
         </div>
     </div>
 
-    <div class="container">
-        <div id="loadingSection" class="loading">
-            <h2>Loading your dashboard...</h2>
+    <!-- Loading Section -->
+    <div id="loadingSection" class="loading">
+        <h2>Setting up your dashboard...</h2>
+    </div>
+
+    <!-- Main Dashboard Content -->
+    <div id="dashboardContent" style="display: none;">
+        <!-- Hero Section -->
+        <div class="hero-section">
+            <div class="hero-content">
+                <h1>Add Authentication to Any Website</h1>
+                <p class="hero-subtitle">Enterprise-grade user management that takes 2 minutes to integrate</p>
+
+                <!-- Benefits -->
+                <div class="benefits">
+                    <div class="benefit">
+                        <div class="benefit-icon">⚡</div>
+                        <span>Setup in 2 minutes</span>
+                    </div>
+                    <div class="benefit">
+                        <div class="benefit-icon">🔒</div>
+                        <span>Enterprise security</span>
+                    </div>
+                    <div class="benefit">
+                        <div class="benefit-icon">🚀</div>
+                        <span>Zero maintenance</span>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <div id="dashboardContent" style="display: none;">
-            <div class="welcome-section">
-                <h1>Welcome back, <span id="welcomeName">User</span>! 👋</h1>
-                <p>Here's an overview of your account and recent activity.</p>
+        <!-- Platforms Section -->
+        <div class="platforms-section">
+            <div class="container">
+                <!-- New User State -->
+                <div id="newUserState" class="new-user-state">
+                    <div class="setup-card">
+                        <div class="setup-header">
+                            <h2>Create Your First Platform</h2>
+                            <p>Get custom integration code in seconds</p>
+                        </div>
+
+                        <!-- Setup Form -->
+                        <form id="platformForm" class="platform-form">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="platformName">Platform Name</label>
+                                    <input type="text" id="platformName" placeholder="My Awesome App" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="platformDomain">Website Domain</label>
+                                    <input type="text" id="platformDomain" placeholder="myapp.com" required>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="create-btn" id="createBtn">
+                                <span class="btn-text">Create Platform & Get Code</span>
+                                <span class="btn-loading" style="display: none;">Creating...</span>
+                            </button>
+                        </form>
+
+                        <!-- Progress Indicator -->
+                        <div class="progress-steps">
+                            <div class="step active">
+                                <div class="step-number">1</div>
+                                <span>Platform Details</span>
+                            </div>
+                            <div class="step" id="step2">
+                                <div class="step-number">2</div>
+                                <span>Get Integration Code</span>
+                            </div>
+                            <div class="step" id="step3">
+                                <div class="step-number">3</div>
+                                <span>Test & Launch</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Success State -->
+                <div id="successState" class="success-state" style="display: none;">
+                    <div class="success-header">
+                        <div class="success-icon">✅</div>
+                        <h2>Platform Created Successfully!</h2>
+                        <p>Your integration code is ready. Copy and paste it into your website.</p>
+                    </div>
+
+                    <!-- Integration Code -->
+                    <div class="code-section">
+                        <div class="code-header">
+                            <h3>Your Integration Code</h3>
+                            <button class="copy-btn" id="copyCodeBtn">Copy Code</button>
+                        </div>
+                        <div class="code-block">
+                            <pre id="integrationCode"><!-- Code will be generated here --></pre>
+                        </div>
+                    </div>
+
+                    <!-- Platform Details -->
+                    <div class="platform-details">
+                        <h3>Platform Information</h3>
+                        <div class="details-grid">
+                            <div class="detail-item">
+                                <span class="detail-label">Platform ID:</span>
+                                <span class="detail-value" id="createdPlatformId">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">API Key:</span>
+                                <span class="detail-value api-key" id="createdApiKey">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Domain:</span>
+                                <span class="detail-value" id="createdDomain">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Status:</span>
+                                <span class="detail-value status-active">Active</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Next Steps -->
+                    <div class="next-steps">
+                        <h3>What's Next?</h3>
+                        <div class="steps-list">
+                            <div class="next-step">
+                                <div class="step-icon">1</div>
+                                <div class="step-content">
+                                    <strong>Add the code to your website</strong>
+                                    <p>Paste the integration code into your website's HTML</p>
+                                </div>
+                            </div>
+                            <div class="next-step">
+                                <div class="step-icon">2</div>
+                                <div class="step-content">
+                                    <strong>Test the integration</strong>
+                                    <p>Visit your website and try logging in</p>
+                                </div>
+                            </div>
+                            <div class="next-step">
+                                <div class="step-icon">3</div>
+                                <div class="step-content">
+                                    <strong>You're live!</strong>
+                                    <p>Your users can now register and login securely</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="action-buttons">
+                        <button class="btn-secondary" id="createAnotherBtn">Create Another Platform</button>
+                        <button class="btn-primary" id="viewDocsBtn">View Documentation</button>
+                    </div>
+                </div>
+
+                <!-- Existing Platforms State -->
+                <div id="platformsList" class="platforms-list" style="display: none;">
+                    <div class="platforms-header">
+                        <h2>Your Platforms</h2>
+                        <button class="btn-primary" id="addPlatformBtn">Add New Platform</button>
+                    </div>
+
+                    <div class="platforms-grid" id="platformsGrid">
+                        <!-- Platform cards will be inserted here -->
+                    </div>
+                </div>
             </div>
+        </div>
 
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-icon">📧</div>
-                    <div class="stat-title">Email Status</div>
-                    <div class="stat-value" id="emailStatus">Checking...</div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-icon">🔒</div>
-                    <div class="stat-title">Account Security</div>
-                    <div class="stat-value">Protected</div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-icon">📅</div>
-                    <div class="stat-title">Member Since</div>
-                    <div class="stat-value" id="memberSince">Loading...</div>
-                </div>
-
-                <div class="stat-card">
-                    <div class="stat-icon">⚡</div>
-                    <div class="stat-title">Profile Status</div>
-                    <div class="stat-value" id="profileStatus">Active</div>
-                </div>
-            </div>
-
-            <div class="profile-section">
-                <h2>Your Profile Information</h2>
-                <div class="profile-grid" id="profileGrid">
-                    <!-- Profile information will be loaded here -->
-                </div>
-
-                <div class="actions-section">
-                    <button class="action-btn btn-primary" id="editProfileBtn">Edit Profile</button>
-                    <button class="action-btn btn-secondary" id="changePasswordBtn">Change Password</button>
-                    <button class="action-btn btn-secondary" id="resendVerificationBtn">Resend Verification</button>
+        <!-- Trust Indicators -->
+        <div class="trust-section">
+            <div class="container">
+                <div class="trust-items">
+                    <div class="trust-item">
+                        <strong>Enterprise Security</strong>
+                        <p>Bank-grade encryption and security</p>
+                    </div>
+                    <div class="trust-item">
+                        <strong>99.9% Uptime</strong>
+                        <p>Reliable service you can count on</p>
+                    </div>
+                    <div class="trust-item">
+                        <strong>GDPR Compliant</strong>
+                        <p>Full compliance with privacy regulations</p>
+                    </div>
+                    <div class="trust-item">
+                        <strong>24/7 Support</strong>
+                        <p>Help when you need it most</p>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- 🔒 SECURE SCRIPTS IN PROPER ORDER -->
+    <!-- Scripts -->
     <script src="../../assets/js/config.js"></script>
     <script src="../../assets/js/auth.js"></script>
     <script src="../../assets/js/dashboard.js"></script>

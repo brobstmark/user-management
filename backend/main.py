@@ -11,9 +11,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from backend.core.middleware import SecurityHeadersMiddleware, InputSanitizationMiddleware, generate_csrf_token
-
+from backend.core.middleware import (
+    SecurityHeadersMiddleware,
+    InputSanitizationMiddleware,
+    RateLimitingMiddleware,
+    SecurityLoggingMiddleware
+)
 from backend.config.settings import settings
+from backend.config.validation import validate_configuration
 from backend.api.v1.router import api_router
 from backend.utils.logging import (
     get_api_logger,
@@ -22,162 +27,6 @@ from backend.utils.logging import (
     log_security_event,
     log_audit_event
 )
-
-
-class SecurityLoggingMiddleware(BaseHTTPMiddleware):
-    """
-    Middleware for security-focused request/response logging
-    Tracks all API requests for audit and security monitoring
-    """
-
-    def __init__(self, app, log_requests: bool = True):
-        super().__init__(app)
-        self.log_requests = log_requests
-        self.api_logger = get_api_logger()
-        self.security_logger = get_security_logger()
-
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # Generate correlation ID for request tracking
-        correlation_id = str(uuid.uuid4())
-
-        # Extract security-relevant information
-        client_ip = self._get_client_ip(request)
-        user_agent = request.headers.get("user-agent", "unknown")
-        request_method = request.method
-        request_path = str(request.url.path)
-
-        # Start timing
-        start_time = time.time()
-
-        # Log incoming request (API endpoints only)
-        if self.log_requests and request_path.startswith("/api/"):
-            self.api_logger.info(
-                f"Incoming {request_method} request to {request_path}",
-                extra={
-                    'correlation_id': correlation_id,
-                    'method': request_method,
-                    'path': request_path,
-                    'client_ip': client_ip,
-                    'user_agent': user_agent,
-                    'query_params': dict(request.query_params),
-                    'event_type': 'api_request'
-                }
-            )
-
-        # Process request
-        try:
-            response = await call_next(request)
-            processing_time = time.time() - start_time
-
-            # Log response
-            if self.log_requests and request_path.startswith("/api/"):
-                self.api_logger.info(
-                    f"Response {response.status_code} for {request_method} {request_path}",
-                    extra={
-                        'correlation_id': correlation_id,
-                        'method': request_method,
-                        'path': request_path,
-                        'status_code': response.status_code,
-                        'processing_time_ms': round(processing_time * 1000, 2),
-                        'client_ip': client_ip,
-                        'event_type': 'api_response'
-                    }
-                )
-
-            # Log security events for suspicious activities
-            self._log_security_events(request, response, client_ip, correlation_id)
-
-            return response
-
-        except Exception as e:
-            processing_time = time.time() - start_time
-
-            # Log error
-            self.api_logger.error(
-                f"Request failed: {request_method} {request_path}",
-                extra={
-                    'correlation_id': correlation_id,
-                    'method': request_method,
-                    'path': request_path,
-                    'error_type': type(e).__name__,
-                    'processing_time_ms': round(processing_time * 1000, 2),
-                    'client_ip': client_ip,
-                    'event_type': 'api_error'
-                },
-                exc_info=True
-            )
-
-            # Log security event for errors
-            log_security_event(
-                event_type="api_error",
-                action=f"{request_method} {request_path}",
-                result="error",
-                correlation_id=correlation_id,
-                client_ip=client_ip,
-                error_type=type(e).__name__
-            )
-
-            raise
-
-    def _get_client_ip(self, request: Request) -> str:
-        """Extract client IP address from request"""
-        # Check for forwarded headers (common in reverse proxy setups)
-        forwarded_for = request.headers.get("x-forwarded-for")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-
-        real_ip = request.headers.get("x-real-ip")
-        if real_ip:
-            return real_ip
-
-        return request.client.host if request.client else "unknown"
-
-    def _log_security_events(self, request: Request, response: Response,
-                             client_ip: str, correlation_id: str):
-        """Log security-relevant events"""
-
-        # Log authentication attempts
-        if request.url.path.startswith("/api/v1/auth/"):
-            if response.status_code == 200:
-                log_security_event(
-                    event_type="authentication",
-                    action=f"{request.method} {request.url.path}",
-                    result="success",
-                    correlation_id=correlation_id,
-                    client_ip=client_ip
-                )
-            elif response.status_code in [401, 403]:
-                log_security_event(
-                    event_type="authentication",
-                    action=f"{request.method} {request.url.path}",
-                    result="failure",
-                    correlation_id=correlation_id,
-                    client_ip=client_ip,
-                    status_code=response.status_code
-                )
-
-        # Log failed requests (potential attacks)
-        if response.status_code == 404 and request.url.path.startswith("/api/"):
-            self.security_logger.warning(
-                f"API endpoint not found: {request.method} {request.url.path}",
-                extra={
-                    'correlation_id': correlation_id,
-                    'client_ip': client_ip,
-                    'user_agent': request.headers.get("user-agent"),
-                    'event_type': 'endpoint_not_found'
-                }
-            )
-
-        # Log rate limiting violations (if implemented)
-        if response.status_code == 429:
-            log_security_event(
-                event_type="rate_limit",
-                action=f"{request.method} {request.url.path}",
-                result="violated",
-                correlation_id=correlation_id,
-                client_ip=client_ip
-            )
-
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -206,6 +55,9 @@ app.add_middleware(SecurityHeadersMiddleware)
 # Add input sanitization middleware (ADD THIRD - executes second)
 app.add_middleware(InputSanitizationMiddleware)
 
+# Add rate limiting middleware (ADD FOURTH - executes second)
+app.add_middleware(RateLimitingMiddleware)
+
 # Add security logging middleware (ADD LAST - executes first)
 app.add_middleware(
     SecurityLoggingMiddleware,
@@ -233,18 +85,6 @@ async def root():
         "version": "1.0.0",
         "environment": settings.ENVIRONMENT,
         "docs": "/docs" if settings.DEBUG else None
-    }
-
-
-@app.get("/health")
-async def health_check():
-    """System health check"""
-    startup_logger.debug("Health check endpoint accessed")
-    return {
-        "status": "healthy",
-        "environment": settings.ENVIRONMENT,
-        "debug": settings.DEBUG,
-        "version": "1.0.0"
     }
 
 
@@ -389,40 +229,6 @@ async def shutdown_event():
         result="success",
         environment=settings.ENVIRONMENT
     )
-
-
-# Optional: Add startup validation and logging
-def validate_configuration():
-    """Validate critical configuration and log results"""
-    validation_logger = get_security_logger()
-
-    issues = []
-
-    # Validate email configuration
-    if not settings.EMAIL_USERNAME:
-        issues.append("Email not configured - email features disabled")
-
-    # Validate security settings
-    if settings.SECRET_KEY == "your-super-secret-key-change-this":
-        issues.append("Default secret key detected - security risk")
-
-    # Validate environment
-    if settings.ENVIRONMENT == "production" and settings.DEBUG:
-        issues.append("Debug mode enabled in production - security risk")
-
-    # Log validation results
-    if issues:
-        for issue in issues:
-            validation_logger.warning(
-                f"Configuration issue: {issue}",
-                extra={'event_type': 'configuration_validation'}
-            )
-    else:
-        validation_logger.info(
-            "Configuration validation passed",
-            extra={'event_type': 'configuration_validation'}
-        )
-
 
 # Run validation on import
 validate_configuration()
